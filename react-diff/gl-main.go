@@ -80,13 +80,23 @@ type Pair struct {
 	a, b float32
 }
 
+var conv_matrix [rows + 2][cols + 2]Pair
 var grid [2][rows][cols]Pair
 var gridId = 0
 
 var texture uint32
+var timeMinusCent time.Time
+var framecount = 0
 
 //----- INIT ---------------------------
 func init() {
+	for i := range conv_matrix {
+		for j := range conv_matrix[i] {
+			conv_matrix[i][j].a = 0.0
+			conv_matrix[i][j].b = 0.0
+		}
+	}
+
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
 			grid[0][i][j].a = 1.0
@@ -106,6 +116,7 @@ func init() {
 			}
 		}
 	}
+	timeMinusCent = time.Now()
 }
 
 // MAIN program loop
@@ -115,10 +126,19 @@ func main() {
 	window := initGlfw()
 	defer glfw.Terminate()
 	program := initOpenGL()
+	fps := 0.0
+	var tempTime time.Time
 
 	//cells := makeCells()
 	for !window.ShouldClose() {
 		draw(window, program)
+		framecount++
+		if framecount%100 == 0 {
+			tempTime = time.Now()
+			fps = 100.0 / tempTime.Sub(timeMinusCent).Seconds()
+			timeMinusCent = tempTime
+			fmt.Printf("FPS = %.2f\n", fps)
+		}
 	}
 }
 
@@ -153,54 +173,8 @@ func draw(window *glfw.Window, program uint32) {
 	window.SwapBuffers()
 
 	updateGrid()
-	time.Sleep(1000 * 1000)
+	//time.Sleep(1000 * 1000)
 }
-
-/*
-func makeCells() [][]*cell {
-	cells := make([][]*cell, rows, rows)
-	for x := 0; x < rows; x++ {
-		for y := 0; y < cols; y++ {
-			c := newCell(x, y)
-			cells[x] = append(cells[x], c)
-		}
-	}
-
-	return cells
-}
-
-func newCell(x, y int) *cell {
-	points := make([]float32, len(square), len(square))
-	copy(points, square)
-
-	for i := 0; i < len(points); i++ {
-		var position float32
-		var size float32
-		switch i % 3 {
-		case 0:
-			size = 1.0 / float32(cols)
-			position = float32(x) * size
-		case 1:
-			size = 1.0 / float32(rows)
-			position = float32(y) * size
-		default:
-			continue
-		}
-
-		if points[i] < 0 {
-			points[i] = (position * 2) - 1
-		} else {
-			points[i] = ((position + size) * 2) - 1
-		}
-	}
-	return &cell{
-		drawable: makeVao(points),
-
-		x: x,
-		y: y,
-	}
-}
-*/
 
 // initGlfw initializes glfw and returns a Window to use.
 func initGlfw() *glfw.Window {
@@ -230,10 +204,6 @@ func loadImage(pattern uint32, data []uint8) {
 				data[(4*(i*cols+j))+1] = 0x00
 				data[(4*(i*cols+j))+2] = 0x00
 				data[(4*(i*cols+j))+3] = 0xff
-				//fmt.Println("Pos: ", (4*(i*cols+j))+0, " = ", data[(4*(i*cols+j))+0])
-				//fmt.Println("Pos: ", (4*(i*cols+j))+1, " = ", data[(4*(i*cols+j))+1])
-				//fmt.Println("Pos: ", (4*(i*cols+j))+2, " = ", data[(4*(i*cols+j))+2])
-				//fmt.Println("Pos: ", (4*(i*cols+j))+3, " = ", data[(4*(i*cols+j))+3])
 			}
 		}
 		for i := 20; i < rows-20; i++ {
@@ -257,10 +227,6 @@ func loadImage(pattern uint32, data []uint8) {
 				data[(4*(i*cols+j))+1] = 0x00
 				data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * float64(grid[pattern][i][j].b)))
 				data[(4*(i*cols+j))+3] = 0xff
-				//fmt.Println("Pos: ", (4*(i*cols+j))+0, " = ", data[(4*(i*cols+j))+0])
-				//fmt.Println("Pos: ", (4*(i*cols+j))+1, " = ", data[(4*(i*cols+j))+1])
-				//fmt.Println("Pos: ", (4*(i*cols+j))+2, " = ", data[(4*(i*cols+j))+2])
-				//fmt.Println("Pos: ", (4*(i*cols+j))+3, " = ", data[(4*(i*cols+j))+3])
 			}
 		}
 	}
@@ -278,11 +244,12 @@ func updateGrid() {
 	var dA = 1.0
 	var dB = 0.5
 
+	updateLaplace()
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
 			a = float64(grid[gridId][i][j].a)
 			b = float64(grid[gridId][i][j].b)
-			laplaceA, laplaceB = laplace(i, j)
+			laplaceA, laplaceB = laplaceM(i, j)
 
 			// Calculate the new values
 			newA := a + (dA*laplaceA - a*b*b + feed*(1-a))
@@ -302,6 +269,97 @@ func constrain(input, min, max float64) float32 {
 	var value float32
 	value = float32(math.Min(max, math.Max(min, input)))
 	return value
+}
+
+func updateLaplace() {
+	// Centre
+	for x, i := 0, 1; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 1; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a = grid[gridId][x][y].a * -1.0
+			conv_matrix[i][j].b = grid[gridId][x][y].b * -1.0
+		}
+	}
+	// Left
+	for x, i := 0, 0; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 1; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
+		}
+	}
+	// Right
+	for x, i := 0, 2; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 1; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
+		}
+	}
+	// Up
+	for x, i := 0, 1; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 2; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
+		}
+	}
+	// Down
+	for x, i := 0, 1; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 0; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
+		}
+	}
+	// Left Up
+	for x, i := 0, 0; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 2; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
+		}
+	}
+	// Right Up
+	for x, i := 0, 2; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 2; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
+		}
+	}
+	// Left Down
+	for x, i := 0, 0; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 0; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
+		}
+	}
+	// Right Down
+	for x, i := 0, 2; x < rows; x, i = x+1, i+1 {
+		for y, j := 0, 0; y < cols; y, j = y+1, j+1 {
+			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
+			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
+		}
+	}
+	// Overlaps
+	for j := 0; j < cols+2; j++ {
+		conv_matrix[rows][j].a += conv_matrix[0][j].a
+		conv_matrix[1][j].a += conv_matrix[rows+1][j].a
+		conv_matrix[rows][j].b += conv_matrix[0][j].b
+		conv_matrix[1][j].b += conv_matrix[rows+1][j].b
+		conv_matrix[0][j].a = 0
+		conv_matrix[rows+1][j].a = 0
+		conv_matrix[0][j].b = 0
+		conv_matrix[rows+1][j].b = 0
+	}
+	for i := 0; i < rows+2; i++ {
+		conv_matrix[i][cols].a += conv_matrix[i][0].a
+		conv_matrix[i][1].a += conv_matrix[i][cols+1].a
+		conv_matrix[i][cols].b += conv_matrix[i][0].b
+		conv_matrix[i][1].b += conv_matrix[i][cols+1].b
+		conv_matrix[i][0].a = 0
+		conv_matrix[i][cols+1].a = 0
+		conv_matrix[i][0].b = 0
+		conv_matrix[i][cols+1].b = 0
+	}
+}
+
+func laplaceM(x, y int) (float64, float64) {
+	return float64(conv_matrix[x+1][y+1].a), float64(conv_matrix[x+1][y+1].b)
 }
 
 func laplace(x, y int) (float64, float64) {

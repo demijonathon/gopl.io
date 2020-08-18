@@ -17,47 +17,57 @@ const (
 	width  = 1000
 	height = 1000
 
+	RD_INIT_IMAGE = 2
+
 	vertexShaderSource = `
 		#version 410
-		in vec3 vp;
+    layout (location = 0) in vec3 aPos;
+    layout (location = 1) in vec3 aColor;
+    layout (location = 2) in vec2 aTexCoord;
+
+    out vec3 ourColor;
+    out vec2 TexCoord;
+
 		void main() {
-			gl_Position = vec4(vp, 1.0);
+      gl_Position = vec4(aPos, 1.0);
+      ourColor = aColor;
+      TexCoord = aTexCoord;
 		}
 	` + "\x00"
 
 	fragmentShaderSource = `
 		#version 410
-		uniform vec3 my_colour;
-		out vec4 frag_colour;
+		out vec4 FragColor;
+
+    in vec3 ourColor;
+    in vec2 TexCoord;
+
+    uniform sampler2D ourTexture;
+
 		void main() {
-			frag_colour = vec4(my_colour, 1.0);
+      FragColor = texture(ourTexture, TexCoord);
 		}
 	` + "\x00"
 
-	res  = 10
+	res  = 5
 	rows = height / res
 	cols = width / res
 )
 
 var (
-	stripSquare = []float32{
-		-0.5, 0.5, 0,
-		-0.5, -0.5, 0,
-		0.5, 0.5, 0,
-		0.5, -0.5, 0,
+	vertices = []float32{
+		// positions          // colors           // texture coords
+		1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
+		1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
+		-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
+		-1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // top left
 	}
-)
-
-var (
-	square = []float32{
-		-0.5, 0.5, 0,
-		-0.5, -0.5, 0,
-		0.5, -0.5, 0,
-
-		-0.5, 0.5, 0,
-		0.5, 0.5, 0,
-		0.5, -0.5, 0,
+	indices = []uint32{
+		0, 1, 3, // first triangle
+		1, 2, 3, // second triangle
 	}
+	VBO, VAO, EBO uint32
+	data          = make([]byte, cols*rows*4)
 )
 
 type cell struct {
@@ -73,6 +83,9 @@ type Pair struct {
 var grid [2][rows][cols]Pair
 var gridId = 0
 
+var texture uint32
+
+//----- INIT ---------------------------
 func init() {
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
@@ -103,26 +116,38 @@ func main() {
 	defer glfw.Terminate()
 	program := initOpenGL()
 
-	cells := makeCells()
+	//cells := makeCells()
 	for !window.ShouldClose() {
-		draw(cells, window, program)
+		draw(window, program)
 	}
 }
 
 // DRAW method for vertex arrays
-func draw(cells [][]*cell, window *glfw.Window, program uint32) {
+func draw(window *glfw.Window, program uint32) {
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	gl.UseProgram(program)
 
-	var color [3]float32
-	for x := range cells {
-		for y, c := range cells[x] {
-			color[0] = grid[gridId][x][y].a
-			color[1] = 0.0
-			color[2] = grid[gridId][x][y].b
-			c.draw(color, program)
-		}
-	}
+	/*
+		var color [3]float32
+		for x := range cells {
+			for y, c := range cells[x] {
+				color[0] = grid[gridId][x][y].a
+				color[1] = 0.0
+				color[2] = grid[gridId][x][y].b
+				c.draw(color, program)
+			}
+		}*/
+
+	// bind Texture
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, texture)
+
+	// render container
+	//ourShader.use();
+	gl.BindVertexArray(VAO)
+	gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
+
+	CheckGLErrors()
 
 	glfw.PollEvents()
 	window.SwapBuffers()
@@ -131,6 +156,7 @@ func draw(cells [][]*cell, window *glfw.Window, program uint32) {
 	time.Sleep(1000 * 1000)
 }
 
+/*
 func makeCells() [][]*cell {
 	cells := make([][]*cell, rows, rows)
 	for x := 0; x < rows; x++ {
@@ -167,7 +193,6 @@ func newCell(x, y int) *cell {
 			points[i] = ((position + size) * 2) - 1
 		}
 	}
-
 	return &cell{
 		drawable: makeVao(points),
 
@@ -175,13 +200,7 @@ func newCell(x, y int) *cell {
 		y: y,
 	}
 }
-
-func (c *cell) draw(color [3]float32, program uint32) {
-	gl.BindVertexArray(c.drawable)
-	color_location := gl.GetUniformLocation(program, gl.Str("my_colour\x00"))
-	gl.Uniform3fv(color_location, 1, &color[0])
-	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(square)/3))
-}
+*/
 
 // initGlfw initializes glfw and returns a Window to use.
 func initGlfw() *glfw.Window {
@@ -201,6 +220,50 @@ func initGlfw() *glfw.Window {
 	window.MakeContextCurrent()
 
 	return window
+}
+
+func loadImage(pattern uint32, data []uint8) {
+	if pattern == 2 { // Initialise
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				data[(4*(i*cols+j))+0] = 0xff
+				data[(4*(i*cols+j))+1] = 0x00
+				data[(4*(i*cols+j))+2] = 0x00
+				data[(4*(i*cols+j))+3] = 0xff
+				//fmt.Println("Pos: ", (4*(i*cols+j))+0, " = ", data[(4*(i*cols+j))+0])
+				//fmt.Println("Pos: ", (4*(i*cols+j))+1, " = ", data[(4*(i*cols+j))+1])
+				//fmt.Println("Pos: ", (4*(i*cols+j))+2, " = ", data[(4*(i*cols+j))+2])
+				//fmt.Println("Pos: ", (4*(i*cols+j))+3, " = ", data[(4*(i*cols+j))+3])
+			}
+		}
+		for i := 20; i < rows-20; i++ {
+			for j := 20; j < cols-20; j++ {
+				value := rand.Float64()
+				if value > 0.6 {
+					data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * value))
+				} else {
+					data[(4*(i*cols+j))+2] = 0xff
+				}
+			}
+		}
+		data[(4*(2*cols+2))+2] = 0xff
+		data[(4*(3*cols+2))+2] = 0xff
+		data[(4*(3*cols+3))+2] = 0xff
+		data[(4*(2*cols+3))+2] = 0xff
+	} else if pattern < 2 { // load from grid
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				data[(4*(i*cols+j))+0] = uint8(math.Round(255.0 * float64(grid[pattern][i][j].a)))
+				data[(4*(i*cols+j))+1] = 0x00
+				data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * float64(grid[pattern][i][j].b)))
+				data[(4*(i*cols+j))+3] = 0xff
+				//fmt.Println("Pos: ", (4*(i*cols+j))+0, " = ", data[(4*(i*cols+j))+0])
+				//fmt.Println("Pos: ", (4*(i*cols+j))+1, " = ", data[(4*(i*cols+j))+1])
+				//fmt.Println("Pos: ", (4*(i*cols+j))+2, " = ", data[(4*(i*cols+j))+2])
+				//fmt.Println("Pos: ", (4*(i*cols+j))+3, " = ", data[(4*(i*cols+j))+3])
+			}
+		}
+	}
 }
 
 func updateGrid() {
@@ -230,6 +293,9 @@ func updateGrid() {
 		}
 	}
 	gridId = nextGridId
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
+	gl.GenerateMipmap(gl.TEXTURE_2D)
+	loadImage(uint32(gridId), data)
 }
 
 func constrain(input, min, max float64) float32 {
@@ -261,29 +327,6 @@ func laplace(x, y int) (float64, float64) {
 			count += 1
 		}
 	}
-	/*
-
-		sumA += float64(grid[gridId][pmod(x, res)][pmod(y, res)].a) * -1.0
-		sumA += float64(grid[gridId][pmod(x+1, res)][pmod(y, res)].a) * 0.2
-		sumA += float64(grid[gridId][pmod(x-1, res)][pmod(y, res)].a) * 0.2
-		sumA += float64(grid[gridId][pmod(x, res)][pmod(y+1, res)].a) * 0.2
-		sumA += float64(grid[gridId][pmod(x, res)][pmod(y-1, res)].a) * 0.2
-		sumA += float64(grid[gridId][pmod(x+1, res)][pmod(y-1, res)].a) * 0.05
-		sumA += float64(grid[gridId][pmod(x+1, res)][pmod(y+1, res)].a) * 0.05
-		sumA += float64(grid[gridId][pmod(x-1, res)][pmod(y+1, res)].a) * 0.05
-		sumA += float64(grid[gridId][pmod(x-1, res)][pmod(y-1, res)].a) * 0.05
-
-		sumB += float64(grid[gridId][pmod(x, res)][pmod(y, res)].b) * -1.0
-		sumB += float64(grid[gridId][pmod(x+1, res)][pmod(y, res)].b) * 0.2
-		sumB += float64(grid[gridId][pmod(x-1, res)][pmod(y, res)].b) * 0.2
-		sumB += float64(grid[gridId][pmod(x, res)][pmod(y+1, res)].b) * 0.2
-		sumB += float64(grid[gridId][pmod(x, res)][pmod(y-1, res)].b) * 0.2
-		sumB += float64(grid[gridId][pmod(x+1, res)][pmod(y-1, res)].b) * 0.05
-		sumB += float64(grid[gridId][pmod(x+1, res)][pmod(y+1, res)].b) * 0.05
-		sumB += float64(grid[gridId][pmod(x-1, res)][pmod(y+1, res)].b) * 0.05
-		sumB += float64(grid[gridId][pmod(x-1, res)][pmod(y-1, res)].b) * 0.05
-	*/
-
 	return sumA, sumB
 }
 
@@ -321,6 +364,48 @@ func initOpenGL() uint32 {
 	gl.AttachShader(prog, vertexShader)
 	gl.AttachShader(prog, fragmentShader)
 	gl.LinkProgram(prog)
+
+	gl.GenVertexArrays(1, &VAO)
+	gl.GenBuffers(1, &VBO)
+	gl.GenBuffers(1, &EBO)
+
+	gl.BindVertexArray(VAO)
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, VBO)
+	gl.BufferData(gl.ARRAY_BUFFER, 4*len(vertices), gl.Ptr(vertices), gl.STATIC_DRAW)
+
+	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, EBO)
+	gl.BufferData(gl.ELEMENT_ARRAY_BUFFER, 4*len(indices), gl.Ptr(indices), gl.STATIC_DRAW)
+
+	// position attribute
+	var vOffset int = 0
+	gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 8*4, gl.PtrOffset(vOffset))
+	gl.EnableVertexAttribArray(0)
+	// color attribute
+	var cOffset int = 3 * 4
+	gl.VertexAttribPointer(1, 3, gl.FLOAT, false, 8*4, gl.PtrOffset(cOffset))
+	gl.EnableVertexAttribArray(1)
+	// texture coord attribute
+	var tOffset int = 6 * 4
+	gl.VertexAttribPointer(2, 2, gl.FLOAT, false, 8*4, gl.PtrOffset(tOffset))
+	gl.EnableVertexAttribArray(2)
+
+	gl.GenTextures(1, &texture)
+	gl.BindTexture(gl.TEXTURE_2D, texture)
+	// set the texture wrapping/filtering options (on the currently bound texture object)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+
+	loadImage(RD_INIT_IMAGE, data)
+
+	// END OF DAY - check if colours are written correctly in the data buffer
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
+	gl.GenerateMipmap(gl.TEXTURE_2D)
+
 	return prog
 }
 
@@ -334,9 +419,11 @@ func makeVao(points []float32) uint32 {
 	var vao uint32
 	gl.GenVertexArrays(1, &vao)
 	gl.BindVertexArray(vao)
-	gl.EnableVertexAttribArray(0)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
-	gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 0, nil)
+	var offset int = 6 * 4
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 8*4, gl.PtrOffset(offset))
+	gl.EnableVertexAttribArray(0)
+	//gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 0, nil)
 
 	return vao
 }
@@ -362,4 +449,34 @@ func compileShader(source string, shaderType uint32) (uint32, error) {
 	}
 
 	return shader, nil
+}
+
+func CheckGLErrors() {
+	glerror := gl.GetError()
+	if glerror == gl.NO_ERROR {
+		return
+	}
+
+	fmt.Printf("gl.GetError() reports")
+	for glerror != gl.NO_ERROR {
+		fmt.Printf(" ")
+		switch glerror {
+		case gl.INVALID_ENUM:
+			fmt.Printf("GL_INVALID_ENUM")
+		case gl.INVALID_VALUE:
+			fmt.Printf("GL_INVALID_VALUE")
+		case gl.INVALID_OPERATION:
+			fmt.Printf("GL_INVALID_OPERATION")
+		case gl.STACK_OVERFLOW:
+			fmt.Printf("GL_STACK_OVERFLOW")
+		case gl.STACK_UNDERFLOW:
+			fmt.Printf("GL_STACK_UNDERFLOW")
+		case gl.OUT_OF_MEMORY:
+			fmt.Printf("GL_OUT_OF_MEMORY")
+		default:
+			fmt.Printf("%d", glerror)
+		}
+		glerror = gl.GetError()
+	}
+	fmt.Printf("\n")
 }

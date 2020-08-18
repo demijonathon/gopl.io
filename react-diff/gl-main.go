@@ -49,20 +49,28 @@ const (
 		}
 	` + "\x00"
 
-	res  = 5
-	rows = height / res
-	cols = width / res
+	res              = 20
+	plane_res        = 50
+	rows             = height / res
+	cols             = width / res
+	plane_rows       = height / plane_res
+	plane_cols       = width / plane_res
+	plane_vert_count = (plane_rows + 1) * (plane_cols + 1)
 )
 
 var (
-	vertices = []float32{
+	vertices = make([]float32, 8*(plane_rows+1)*(plane_cols+1))
+
+	vertices2 = []float32{
 		// positions          // colors           // texture coords
 		1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
 		1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
 		-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
 		-1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // top left
 	}
-	indices = []uint32{
+	indices = make([]uint32, 2*(plane_rows*plane_cols+plane_cols*2-1))
+
+	indices2 = []uint32{
 		0, 1, 3, // first triangle
 		1, 2, 3, // second triangle
 	}
@@ -116,6 +124,7 @@ func init() {
 			}
 		}
 	}
+	make_plane(plane_rows, plane_cols, vertices, indices)
 	timeMinusCent = time.Now()
 }
 
@@ -163,9 +172,9 @@ func draw(window *glfw.Window, program uint32) {
 	gl.BindTexture(gl.TEXTURE_2D, texture)
 
 	// render container
-	//ourShader.use();
 	gl.BindVertexArray(VAO)
-	gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
+	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
+	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
 
 	CheckGLErrors()
 
@@ -194,6 +203,65 @@ func initGlfw() *glfw.Window {
 	window.MakeContextCurrent()
 
 	return window
+}
+
+func make_plane(width, height uint32, vertices []float32, indices []uint32) {
+	width++
+	height++
+
+	var x, y uint32
+	var scale float32
+	scale = 2.0 / float32(plane_rows)
+	// Set up vertices
+	for y = 0; y < height; y++ {
+		base := y * width
+		for x = 0; x < width; x++ {
+			index := base + x
+			// Position
+			vertices[(8 * index)] = float32(x)*scale - 1.0
+			vertices[(8*index)+1] = float32(y)*scale - 1.0
+			vertices[(8*index)+2] = float32(0.0)
+			// Colours
+			vertices[(8*index)+3] = float32(1.0)
+			vertices[(8*index)+4] = float32(1.0)
+			vertices[(8*index)+5] = float32(1.0)
+			// Texture
+			vertices[(8*index)+6] = float32(y) / float32(height-1)
+			vertices[(8*index)+7] = float32(x) / float32(width-1)
+			fmt.Printf("%d: %.2f, %.2f // Col %.2f %.2f %.2f // Text %.2f, %.2f\n",
+				index, vertices[(8*index)+0], vertices[(8*index)+1],
+				vertices[(8*index)+3], vertices[(8*index)+4], vertices[(8*index)+5],
+				vertices[(8*index)+6], vertices[(8*index)+7])
+		}
+	}
+
+	// Set up indices
+	i := 0
+	height--
+	for y = 0; y < height; y++ {
+		base := y * width
+
+		//indices[i++] = (uint16)base;
+		for x = 0; x < width; x++ {
+			indices[i] = (uint32)(base + x)
+			i += 1
+			indices[i] = (uint32)(base + width + x)
+			i += 1
+		}
+		// add a degenerate triangle (except in a last row)
+		if y < height-1 {
+			indices[i] = (uint32)((y+1)*width + (width - 1))
+			i += 1
+			indices[i] = (uint32)((y + 1) * width)
+			i += 1
+		}
+	}
+
+	/*var ind int
+	for ind = 0; ind < i; ind++ {
+		fmt.Printf("%d ", indices[ind])
+	}
+	fmt.Printf("\nIn total %d indices\n", ind)*/
 }
 
 func loadImage(pattern uint32, data []uint8) {

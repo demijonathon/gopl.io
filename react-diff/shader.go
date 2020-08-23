@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	vertexShaderSource = `
+	// Transforms
+	vertexShaderSourceA = `
 		#version 410
     layout (location = 0) in vec3 aPos;
     layout (location = 1) in vec3 aColor;
@@ -29,8 +30,26 @@ const (
       TexCoord = aTexCoord;
 		}
 	` + "\x00"
+	// Transforms
 
-	fragmentShaderSource = `
+	vertexShaderSourceB = `
+		#version 410
+    layout (location = 0) in vec3 aPos;
+    layout (location = 1) in vec3 aColor;
+    layout (location = 2) in vec2 aTexCoord;
+
+    out vec3 ourColor;
+    out vec2 TexCoord;
+
+		void main() {
+      gl_Position = vec4(aPos, 1.0);
+      ourColor = aColor;
+      TexCoord = aTexCoord;
+		}
+	` + "\x00"
+
+	// Basic Texture Colour
+	fragmentShaderSourceA = `
 		#version 410
 		out vec4 FragColor;
 
@@ -41,6 +60,66 @@ const (
 
 		void main() {
       FragColor = texture(ourTexture, TexCoord);
+		}
+	` + "\x00"
+
+	// Reaction Diffusion Changes
+	fragmentShaderSourceB = `
+    #version 410
+    const float offset = 1.0 / 10.0; /* res ?? */
+    layout (location = 0) out vec4 FragColor;
+
+    in vec3 ourColor;
+    in vec2 TexCoord;
+
+    uniform sampler2D texture1;
+
+    void main() {
+
+      vec2 offsets[9] = vec2[](
+        vec2(-offset,  offset), // top-left
+        vec2( 0.0f,    offset), // top-center
+        vec2( offset,  offset), // top-right
+        vec2(-offset,  0.0f),   // center-left
+        vec2( 0.0f,    0.0f),   // center-center
+        vec2( offset,  0.0f),   // center-right
+        vec2(-offset, -offset), // bottom-left
+        vec2( 0.0f,   -offset), // bottom-center
+        vec2( offset, -offset)  // bottom-right
+      );
+
+      float kernel[9] = float[](
+        0.05,  0.2, 0.05,
+         0.2, -1.0,  0.2,
+        0.05,  0.2, 0.05
+      );
+
+      vec3 sampleTex[9];
+      for(int i = 0; i < 9; i++)
+      {
+        sampleTex[i] = vec3(texture(texture1, TexCoord.st + offsets[i]));
+      }
+      vec3 col = vec3(0.0);
+      for(int i = 0; i < 9; i++)
+        col += sampleTex[i] * kernel[i];
+
+      FragColor = vec4(col, 1.0);
+      /*FragColor = mix(texture(texture1, TexCoord), texture(texture2, TexCoord), 0.2);*/
+    }
+  ` + "\x00"
+
+	// Basic Texture Colour
+	fragmentShaderSourceC = `
+		#version 410
+		out vec4 FragColor;
+
+    in vec3 ourColor;
+    in vec2 TexCoord;
+
+    uniform sampler2D ourTexture;
+
+		void main() {
+      FragColor = mix(0.4, 0.8, 0.4, 1.0),texture(ourTexture, TexCoord, 0.5);
 		}
 	` + "\x00"
 )

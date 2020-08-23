@@ -47,6 +47,7 @@ var (
 	VBO, VAO, EBO       uint32
 	sqVBO, sqVAO, sqEBO uint32
 	data                = make([]byte, cols*rows*4)
+	FBO                 uint32
 )
 
 type cell struct {
@@ -63,7 +64,8 @@ var conv_matrix [rows + 2][cols + 2]Pair
 var grid [2][rows][cols]Pair
 var gridId = 0
 
-var texture uint32
+var depthrenderbuffer uint32
+var texture, renderedTexture uint32
 var timeMinusCent time.Time
 var framecount = 0
 
@@ -105,14 +107,13 @@ func main() {
 
 	window := initGlfw()
 	defer glfw.Terminate()
-	program := initOpenGL()
+	basicProgram, rdProgram := initOpenGL()
 	fps := 0.0
 	var tempTime time.Time
-	viewSetup(program)
+	viewSetup(basicProgram)
 
-	//cells := makeCells()
 	for !window.ShouldClose() {
-		draw(window, program)
+		draw(window, basicProgram, rdProgram)
 		framecount++
 		if framecount%100 == 0 {
 			tempTime = time.Now()
@@ -124,20 +125,9 @@ func main() {
 }
 
 // DRAW method for vertex arrays
-func draw(window *glfw.Window, program uint32) {
+func draw(window *glfw.Window, basicProgram, rdProgram uint32) {
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	gl.UseProgram(program)
-
-	/*
-		var color [3]float32
-		for x := range cells {
-			for y, c := range cells[x] {
-				color[0] = grid[gridId][x][y].a
-				color[1] = 0.0
-				color[2] = grid[gridId][x][y].b
-				c.draw(color, program)
-			}
-		}*/
+	gl.UseProgram(rdProgram)
 
 	// bind Texture
 	gl.ActiveTexture(gl.TEXTURE0)
@@ -146,18 +136,20 @@ func draw(window *glfw.Window, program uint32) {
 	var model glm.Mat4
 	var uniModel int32
 	// render container
-	gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
-
-	model = glm.HomogRotate3DX(glm.DegToRad(0.0))
-	uniModel = gl.GetUniformLocation(program, gl.Str("model\x00"))
-	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
-	gl.BindVertexArray(sqVAO)
-	gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
-	gl.BindVertexArray(0)
-	CheckGLErrors()
-
+	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
+	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
+	/*
+		model = glm.HomogRotate3DX(glm.DegToRad(0.0))
+		uniModel = gl.GetUniformLocation(basicProgram, gl.Str("model\x00"))
+		gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
+		gl.BindVertexArray(sqVAO)
+		gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
+		gl.BindVertexArray(0)
+		CheckGLErrors()
+	*/
+	gl.UseProgram(basicProgram)
 	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
-	uniModel = gl.GetUniformLocation(program, gl.Str("model\x00"))
+	uniModel = gl.GetUniformLocation(basicProgram, gl.Str("model\x00"))
 	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
 	gl.BindVertexArray(VAO)
 	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
@@ -168,7 +160,7 @@ func draw(window *glfw.Window, program uint32) {
 	window.SwapBuffers()
 
 	updateGrid()
-	//time.Sleep(1000 * 1000)
+	time.Sleep(1000 * 1000 * 1000)
 }
 
 func viewSetup(program uint32) {
@@ -475,27 +467,43 @@ func pmod(x, d int) int {
 
 //------------------------------------
 // initOpenGL initializes OpenGL and returns an intiialized program.
-func initOpenGL() uint32 {
+func initOpenGL() (uint32, uint32) {
 	if err := gl.Init(); err != nil {
 		panic(err)
 	}
 	version := gl.GoStr(gl.GetString(gl.VERSION))
 	log.Println("OpenGL version", version)
 
-	vertexShader, err := compileShader(vertexShaderSource, gl.VERTEX_SHADER)
+	basicVertexShader, err := compileShader(vertexShaderSourceA, gl.VERTEX_SHADER)
 	if err != nil {
 		panic(err)
 	}
 
-	fragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
+	rdVertexShader, err := compileShader(vertexShaderSourceB, gl.VERTEX_SHADER)
 	if err != nil {
 		panic(err)
 	}
 
-	prog := gl.CreateProgram()
-	gl.AttachShader(prog, vertexShader)
-	gl.AttachShader(prog, fragmentShader)
-	gl.LinkProgram(prog)
+	basicFragmentShader, err := compileShader(fragmentShaderSourceA, gl.FRAGMENT_SHADER)
+	if err != nil {
+		panic(err)
+	}
+
+	/*
+		rdFragmentShader, err := compileShader(fragmentShaderSourceB, gl.FRAGMENT_SHADER)
+		if err != nil {
+			panic(err)
+		}*/
+
+	rdProg := gl.CreateProgram()
+	gl.AttachShader(rdProg, rdVertexShader)
+	gl.AttachShader(rdProg, basicFragmentShader)
+	gl.LinkProgram(rdProg)
+
+	basicProg := gl.CreateProgram()
+	gl.AttachShader(basicProg, basicVertexShader)
+	gl.AttachShader(basicProg, basicFragmentShader)
+	gl.LinkProgram(basicProg)
 
 	gl.GenVertexArrays(1, &VAO)
 	gl.GenBuffers(1, &VBO)
@@ -547,15 +555,53 @@ func initOpenGL() uint32 {
 
 	gl.BindVertexArray(0) // Unbind
 
+	/*
+		// -==- Render to texture -==-
+		gl.GenFramebuffers(1, &FBO)
+		// The texture we're going to render to
+		gl.GenTextures(1, &renderedTexture)
+
+		// "Bind" the newly created texture : all future texture functions will modify this texture
+		gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
+
+		// Give an empty image to OpenGL ( the last "0" means "empty" )
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, nil)
+
+		// Poor filtering
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+
+		// The depth buffer
+		gl.GenRenderbuffers(1, &depthrenderbuffer)
+		gl.BindRenderbuffer(gl.RENDERBUFFER, depthrenderbuffer)
+		gl.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT, width, height)
+		gl.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthrenderbuffer)
+		gl.FramebufferTexture(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, renderedTexture, 0)
+
+		// Set the list of draw buffers.
+		DrawBuffers := [1]uint32{gl.COLOR_ATTACHMENT0}
+		gl.DrawBuffers(int32(len(DrawBuffers)), &DrawBuffers[0])
+
+		// Always check that our framebuffer is ok
+		status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
+		if status != gl.FRAMEBUFFER_COMPLETE {
+			fmt.Println("Framebuffer failed validation with status: ", status)
+		}
+	*/
+	// -==- Texture data -==-
 	gl.GenTextures(1, &texture)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
 	// set the texture wrapping/filtering options (on the currently bound texture object)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 
 	loadImage(RD_INIT_IMAGE, data)
 
@@ -563,7 +609,7 @@ func initOpenGL() uint32 {
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.GenerateMipmap(gl.TEXTURE_2D)
 
-	return prog
+	return basicProg, rdProg
 }
 
 // makeVao initializes and returns a vertex array from the points provided.

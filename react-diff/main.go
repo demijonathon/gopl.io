@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 	"runtime"
-	"strings"
 
+	"github.com/EngoEngine/glm"
 	"github.com/go-gl/gl/v4.1-core/gl" // OR: github.com/go-gl/gl/v2.1/gl
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"math"
@@ -18,36 +18,6 @@ const (
 	height = 1000
 
 	RD_INIT_IMAGE = 2
-
-	vertexShaderSource = `
-		#version 410
-    layout (location = 0) in vec3 aPos;
-    layout (location = 1) in vec3 aColor;
-    layout (location = 2) in vec2 aTexCoord;
-
-    out vec3 ourColor;
-    out vec2 TexCoord;
-
-		void main() {
-      gl_Position = vec4(aPos, 1.0);
-      ourColor = aColor;
-      TexCoord = aTexCoord;
-		}
-	` + "\x00"
-
-	fragmentShaderSource = `
-		#version 410
-		out vec4 FragColor;
-
-    in vec3 ourColor;
-    in vec2 TexCoord;
-
-    uniform sampler2D ourTexture;
-
-		void main() {
-      FragColor = texture(ourTexture, TexCoord);
-		}
-	` + "\x00"
 
 	res              = 20
 	plane_res        = 50
@@ -63,10 +33,10 @@ var (
 
 	vertices2 = []float32{
 		// positions          // colors           // texture coords
-		1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
-		1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
-		-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
-		-1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // top left
+		0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
+		0.5, -0.5, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
+		-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
+		-0.5, 0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // top left
 	}
 	indices = make([]uint32, 2*(plane_rows*plane_cols+plane_cols*2-1))
 
@@ -138,6 +108,7 @@ func main() {
 	program := initOpenGL()
 	fps := 0.0
 	var tempTime time.Time
+	viewSetup(program)
 
 	//cells := makeCells()
 	for !window.ShouldClose() {
@@ -172,16 +143,24 @@ func draw(window *glfw.Window, program uint32) {
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
 
+	var model glm.Mat4
+	var uniModel int32
 	// render container
-	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
+	gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
 
-	gl.BindVertexArray(VAO)
-	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
+	model = glm.HomogRotate3DX(glm.DegToRad(0.0))
+	uniModel = gl.GetUniformLocation(program, gl.Str("model\x00"))
+	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
+	gl.BindVertexArray(sqVAO)
+	gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
 	gl.BindVertexArray(0)
 	CheckGLErrors()
 
-	gl.BindVertexArray(sqVAO)
-	gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
+	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
+	uniModel = gl.GetUniformLocation(program, gl.Str("model\x00"))
+	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
+	gl.BindVertexArray(VAO)
+	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
 	gl.BindVertexArray(0)
 	CheckGLErrors()
 
@@ -190,6 +169,26 @@ func draw(window *glfw.Window, program uint32) {
 
 	updateGrid()
 	//time.Sleep(1000 * 1000)
+}
+
+func viewSetup(program uint32) {
+
+	var view, proj glm.Mat4
+	var uniProj, uniView int32
+
+	gl.UseProgram(program)
+
+	view = glm.LookAt(
+		0.0, -2.5, 1.0, // Eye
+		0.0, 0.0, 0.0, // Centre
+		0.0, 0.0, 1.0, // Up
+	)
+	uniView = gl.GetUniformLocation(program, gl.Str("view\x00"))
+	gl.UniformMatrix4fv(uniView, 1, false, &view[0])
+	proj = glm.Perspective(glm.DegToRad(45.0), float32(height)/float32(width), 1.0, 10.0)
+	uniProj = gl.GetUniformLocation(program, gl.Str("proj\x00"))
+	gl.UniformMatrix4fv(uniProj, 1, false, &proj[0])
+
 }
 
 // initGlfw initializes glfw and returns a Window to use.
@@ -584,29 +583,6 @@ func makeVao(points []float32) uint32 {
 	//gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 0, nil)
 
 	return vao
-}
-
-func compileShader(source string, shaderType uint32) (uint32, error) {
-	shader := gl.CreateShader(shaderType)
-
-	csources, free := gl.Strs(source)
-	gl.ShaderSource(shader, 1, csources, nil)
-	free()
-	gl.CompileShader(shader)
-
-	var status int32
-	gl.GetShaderiv(shader, gl.COMPILE_STATUS, &status)
-	if status == gl.FALSE {
-		var logLength int32
-		gl.GetShaderiv(shader, gl.INFO_LOG_LENGTH, &logLength)
-
-		log := strings.Repeat("\x00", int(logLength+1))
-		gl.GetShaderInfoLog(shader, logLength, nil, gl.Str(log))
-
-		return 0, fmt.Errorf("failed to compile %v: %v", source, log)
-	}
-
-	return shader, nil
 }
 
 func CheckGLErrors() {

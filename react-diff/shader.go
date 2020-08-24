@@ -146,3 +146,39 @@ func compileShader(source string, shaderType uint32) (uint32, error) {
 
 	return shader, nil
 }
+
+func setupShaders() (uint32, uint32) {
+
+	basicVertexShader, err := compileShader(vertexShaderSourceA, gl.VERTEX_SHADER)
+	if err != nil {
+		panic(err)
+	}
+
+	transVertexShader, err := compileShader(vertexShaderSourceB, gl.VERTEX_SHADER)
+	if err != nil {
+		panic(err)
+	}
+
+	basicFragmentShader, err := compileShader(fragmentShaderSourceA, gl.FRAGMENT_SHADER)
+	if err != nil {
+		panic(err)
+	}
+
+	/*
+		rdFragmentShader, err := compileShader(fragmentShaderSourceB, gl.FRAGMENT_SHADER)
+		if err != nil {
+			panic(err)
+		}*/
+
+	rdProg := gl.CreateProgram()
+	gl.AttachShader(rdProg, transVertexShader)
+	gl.AttachShader(rdProg, basicFragmentShader)
+	gl.LinkProgram(rdProg)
+
+	basicProg := gl.CreateProgram()
+	gl.AttachShader(basicProg, basicVertexShader)
+	gl.AttachShader(basicProg, basicFragmentShader)
+	gl.LinkProgram(basicProg)
+
+	return basicProg, rdProg
+}

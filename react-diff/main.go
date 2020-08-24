@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"runtime"
 
 	"github.com/EngoEngine/glm"
@@ -50,6 +51,9 @@ var (
 	FBO                 uint32
 )
 
+var uniTex, uniTex2 int32
+var uniModel int32
+
 type cell struct {
 	drawable uint32
 	x        int
@@ -68,9 +72,14 @@ var depthrenderbuffer uint32
 var texture, renderedTexture uint32
 var timeMinusCent time.Time
 var framecount = 0
+var Info *log.Logger
 
 //----- INIT ---------------------------
 func init() {
+	Info = log.New(os.Stdout,
+		"INFO: ",
+		log.Ldate|log.Ltime|log.Lshortfile)
+
 	for i := range conv_matrix {
 		for j := range conv_matrix[i] {
 			conv_matrix[i][j].a = 0.0
@@ -110,7 +119,16 @@ func main() {
 	basicProgram, rdProgram := initOpenGL()
 	fps := 0.0
 	var tempTime time.Time
-	viewSetup(basicProgram)
+	viewSetup(rdProgram)
+	if CheckGLErrors() {
+		Info.Println("Problem")
+	}
+	gl.UseProgram(basicProgram)
+	uniTex = gl.GetUniformLocation(basicProgram, gl.Str("ourTexture\x00"))
+
+	gl.UseProgram(rdProgram)
+	uniTex2 = gl.GetUniformLocation(rdProgram, gl.Str("ourTexture\x00"))
+	uniModel = gl.GetUniformLocation(rdProgram, gl.Str("model\x00"))
 
 	for !window.ShouldClose() {
 		draw(window, basicProgram, rdProgram)
@@ -126,31 +144,41 @@ func main() {
 
 // DRAW method for vertex arrays
 func draw(window *glfw.Window, basicProgram, rdProgram uint32) {
+
+	// -- DRAW TO BUFFER --
+	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO)
+	gl.Viewport(0, 0, width, height)
+
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	gl.UseProgram(rdProgram)
+	gl.UseProgram(basicProgram)
 
 	// bind Texture
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.Uniform1i(uniTex, 0)
 
-	var model glm.Mat4
-	var uniModel int32
 	// render container
 	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
 	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
-	/*
-		model = glm.HomogRotate3DX(glm.DegToRad(0.0))
-		uniModel = gl.GetUniformLocation(basicProgram, gl.Str("model\x00"))
-		gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
-		gl.BindVertexArray(sqVAO)
-		gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
-		gl.BindVertexArray(0)
-		CheckGLErrors()
-	*/
-	gl.UseProgram(basicProgram)
-	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
-	uniModel = gl.GetUniformLocation(basicProgram, gl.Str("model\x00"))
+
+	gl.BindVertexArray(sqVAO)
+	gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
+	gl.BindVertexArray(0)
+
+	// -- DRAW TO SCREEN --
+	var model glm.Mat4
+
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	gl.Viewport(0, 0, width, height)
+	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.UseProgram(rdProgram)
+	// bind Texture
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
+	model = glm.HomogRotate3DX(glm.DegToRad(0.0))
 	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
+	gl.Uniform1i(uniTex2, 0)
+
 	gl.BindVertexArray(VAO)
 	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
 	gl.BindVertexArray(0)
@@ -169,6 +197,9 @@ func viewSetup(program uint32) {
 	var uniProj, uniView int32
 
 	gl.UseProgram(program)
+	if CheckGLErrors() {
+		Info.Println("Problem")
+	}
 
 	view = glm.LookAt(
 		0.0, -2.5, 1.0, // Eye
@@ -176,10 +207,22 @@ func viewSetup(program uint32) {
 		0.0, 0.0, 1.0, // Up
 	)
 	uniView = gl.GetUniformLocation(program, gl.Str("view\x00"))
+	if CheckGLErrors() {
+		Info.Println("Problem")
+	}
 	gl.UniformMatrix4fv(uniView, 1, false, &view[0])
+	if CheckGLErrors() {
+		Info.Println("Problem")
+	}
 	proj = glm.Perspective(glm.DegToRad(45.0), float32(height)/float32(width), 1.0, 10.0)
+	if CheckGLErrors() {
+		Info.Println("Problem")
+	}
 	uniProj = gl.GetUniformLocation(program, gl.Str("proj\x00"))
 	gl.UniformMatrix4fv(uniProj, 1, false, &proj[0])
+	if CheckGLErrors() {
+		Info.Println("Problem")
+	}
 
 }
 
@@ -474,36 +517,10 @@ func initOpenGL() (uint32, uint32) {
 	version := gl.GoStr(gl.GetString(gl.VERSION))
 	log.Println("OpenGL version", version)
 
-	basicVertexShader, err := compileShader(vertexShaderSourceA, gl.VERTEX_SHADER)
-	if err != nil {
-		panic(err)
-	}
+	var rdProg, basicProg uint32
+	basicProg, rdProg = setupShaders()
 
-	rdVertexShader, err := compileShader(vertexShaderSourceB, gl.VERTEX_SHADER)
-	if err != nil {
-		panic(err)
-	}
-
-	basicFragmentShader, err := compileShader(fragmentShaderSourceA, gl.FRAGMENT_SHADER)
-	if err != nil {
-		panic(err)
-	}
-
-	/*
-		rdFragmentShader, err := compileShader(fragmentShaderSourceB, gl.FRAGMENT_SHADER)
-		if err != nil {
-			panic(err)
-		}*/
-
-	rdProg := gl.CreateProgram()
-	gl.AttachShader(rdProg, rdVertexShader)
-	gl.AttachShader(rdProg, basicFragmentShader)
-	gl.LinkProgram(rdProg)
-
-	basicProg := gl.CreateProgram()
-	gl.AttachShader(basicProg, basicVertexShader)
-	gl.AttachShader(basicProg, basicFragmentShader)
-	gl.LinkProgram(basicProg)
+	//---------------------------
 
 	gl.GenVertexArrays(1, &VAO)
 	gl.GenBuffers(1, &VBO)
@@ -555,43 +572,43 @@ func initOpenGL() (uint32, uint32) {
 
 	gl.BindVertexArray(0) // Unbind
 
-	/*
-		// -==- Render to texture -==-
-		gl.GenFramebuffers(1, &FBO)
-		// The texture we're going to render to
-		gl.GenTextures(1, &renderedTexture)
+	// -==- Render to texture -==-
+	gl.GenFramebuffers(1, &FBO)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO)
+	// The texture we're going to render to
+	gl.GenTextures(1, &renderedTexture)
 
-		// "Bind" the newly created texture : all future texture functions will modify this texture
-		gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
+	// "Bind" the newly created texture : all future texture functions will modify this texture
+	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
 
-		// Give an empty image to OpenGL ( the last "0" means "empty" )
-		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, nil)
+	// Give an empty image to OpenGL ( the last "0" means "empty" )
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, nil)
 
-		// Poor filtering
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
-		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	// Poor filtering
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 
-		// The depth buffer
-		gl.GenRenderbuffers(1, &depthrenderbuffer)
-		gl.BindRenderbuffer(gl.RENDERBUFFER, depthrenderbuffer)
-		gl.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT, width, height)
-		gl.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthrenderbuffer)
-		gl.FramebufferTexture(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, renderedTexture, 0)
+	// The depth buffer
+	gl.GenRenderbuffers(1, &depthrenderbuffer)
+	gl.BindRenderbuffer(gl.RENDERBUFFER, depthrenderbuffer)
+	gl.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT, width, height)
+	gl.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthrenderbuffer)
+	gl.FramebufferTexture(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, renderedTexture, 0)
 
-		// Set the list of draw buffers.
-		DrawBuffers := [1]uint32{gl.COLOR_ATTACHMENT0}
-		gl.DrawBuffers(int32(len(DrawBuffers)), &DrawBuffers[0])
+	// Set the list of draw buffers.
+	DrawBuffers := [1]uint32{gl.COLOR_ATTACHMENT0}
+	gl.DrawBuffers(int32(len(DrawBuffers)), &DrawBuffers[0])
 
-		// Always check that our framebuffer is ok
-		status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
-		if status != gl.FRAMEBUFFER_COMPLETE {
-			fmt.Println("Framebuffer failed validation with status: ", status)
-		}
-	*/
+	// Always check that our framebuffer is ok
+	status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
+	if status != gl.FRAMEBUFFER_COMPLETE {
+		fmt.Println("Framebuffer failed validation with status: ", status)
+	}
+
 	// -==- Texture data -==-
 	gl.GenTextures(1, &texture)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
@@ -631,10 +648,10 @@ func makeVao(points []float32) uint32 {
 	return vao
 }
 
-func CheckGLErrors() {
+func CheckGLErrors() bool {
 	glerror := gl.GetError()
 	if glerror == gl.NO_ERROR {
-		return
+		return false
 	}
 
 	fmt.Printf("gl.GetError() reports")
@@ -659,4 +676,5 @@ func CheckGLErrors() {
 		glerror = gl.GetError()
 	}
 	fmt.Printf("\n")
+	return true
 }

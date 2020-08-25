@@ -34,10 +34,10 @@ var (
 
 	vertices2 = []float32{
 		// positions          // colors           // texture coords
-		0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
-		0.5, -0.5, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
-		-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
-		-0.5, 0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // top left
+		1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
+		1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
+		-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
+		-1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // top left
 	}
 	indices = make([]uint32, 2*(plane_rows*plane_cols+plane_cols*2-1))
 
@@ -52,6 +52,7 @@ var (
 )
 
 var uniTex, uniTex2 int32
+var uniProj, uniView int32
 var uniModel int32
 
 type cell struct {
@@ -116,22 +117,16 @@ func main() {
 
 	window := initGlfw()
 	defer glfw.Terminate()
-	basicProgram, rdProgram := initOpenGL()
+	reactProg, landProg := initOpenGL()
 	fps := 0.0
 	var tempTime time.Time
-	viewSetup(rdProgram)
+	viewSetup(reactProg, landProg)
 	if CheckGLErrors() {
 		Info.Println("Problem")
 	}
-	gl.UseProgram(basicProgram)
-	uniTex = gl.GetUniformLocation(basicProgram, gl.Str("ourTexture\x00"))
-
-	gl.UseProgram(rdProgram)
-	uniTex2 = gl.GetUniformLocation(rdProgram, gl.Str("ourTexture\x00"))
-	uniModel = gl.GetUniformLocation(rdProgram, gl.Str("model\x00"))
 
 	for !window.ShouldClose() {
-		draw(window, basicProgram, rdProgram)
+		draw(window, reactProg, landProg)
 		framecount++
 		if framecount%100 == 0 {
 			tempTime = time.Now()
@@ -143,14 +138,15 @@ func main() {
 }
 
 // DRAW method for vertex arrays
-func draw(window *glfw.Window, basicProgram, rdProgram uint32) {
+func draw(window *glfw.Window, reactProg, landProg uint32) {
 
 	// -- DRAW TO BUFFER --
-	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO)
-	gl.Viewport(0, 0, width, height)
+	//gl.BindFramebuffer(gl.FRAMEBUFFER, FBO)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	gl.Viewport(0, 0, width*2, height*2) // Retina display doubles the framebuffer !?!
 
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	gl.UseProgram(basicProgram)
+	gl.UseProgram(reactProg)
 
 	// bind Texture
 	gl.ActiveTexture(gl.TEXTURE0)
@@ -163,25 +159,35 @@ func draw(window *glfw.Window, basicProgram, rdProgram uint32) {
 
 	gl.BindVertexArray(sqVAO)
 	gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
+
 	gl.BindVertexArray(0)
 
 	// -- DRAW TO SCREEN --
 	var model glm.Mat4
 
 	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-	gl.Viewport(0, 0, width, height)
+	//gl.Viewport(0, 0, width, height)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	gl.UseProgram(rdProgram)
+	gl.UseProgram(landProg)
 	// bind Texture
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
-	model = glm.HomogRotate3DX(glm.DegToRad(0.0))
+	//gl.BindTexture(gl.TEXTURE_2D, texture)
+	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
 	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
 	gl.Uniform1i(uniTex2, 0)
 
 	gl.BindVertexArray(VAO)
 	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
 	gl.BindVertexArray(0)
+
+	/*
+		gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO)
+		gl.ReadBuffer(gl.COLOR_ATTACHMENT0)
+		gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO) // Make this the texture ...
+		gl.Viewport(0, 0, width*2, height*2)
+		gl.BlitFramebuffer(0, 0, width*2, height*2, 0, 0, cols, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST)
+	*/
 	CheckGLErrors()
 
 	glfw.PollEvents()
@@ -191,12 +197,11 @@ func draw(window *glfw.Window, basicProgram, rdProgram uint32) {
 	time.Sleep(1000 * 1000 * 1000)
 }
 
-func viewSetup(program uint32) {
+func viewSetup(reactProg, landProg uint32) {
 
 	var view, proj glm.Mat4
-	var uniProj, uniView int32
 
-	gl.UseProgram(program)
+	gl.UseProgram(landProg)
 	if CheckGLErrors() {
 		Info.Println("Problem")
 	}
@@ -206,22 +211,20 @@ func viewSetup(program uint32) {
 		0.0, 0.0, 0.0, // Centre
 		0.0, 0.0, 1.0, // Up
 	)
-	uniView = gl.GetUniformLocation(program, gl.Str("view\x00"))
-	if CheckGLErrors() {
-		Info.Println("Problem")
-	}
+	uniTex2 = gl.GetUniformLocation(landProg, gl.Str("texture1\x00"))
+	uniModel = gl.GetUniformLocation(landProg, gl.Str("model\x00"))
+	uniView = gl.GetUniformLocation(landProg, gl.Str("view\x00"))
+	uniProj = gl.GetUniformLocation(landProg, gl.Str("proj\x00"))
+
 	gl.UniformMatrix4fv(uniView, 1, false, &view[0])
-	if CheckGLErrors() {
-		Info.Println("Problem")
-	}
 	proj = glm.Perspective(glm.DegToRad(45.0), float32(height)/float32(width), 1.0, 10.0)
-	if CheckGLErrors() {
-		Info.Println("Problem")
-	}
-	uniProj = gl.GetUniformLocation(program, gl.Str("proj\x00"))
 	gl.UniformMatrix4fv(uniProj, 1, false, &proj[0])
+
+	gl.UseProgram(reactProg)
+	uniTex = gl.GetUniformLocation(reactProg, gl.Str("ourTexture\x00"))
+
 	if CheckGLErrors() {
-		Info.Println("Problem")
+		Info.Println("viewSetup Problems")
 	}
 
 }
@@ -369,9 +372,9 @@ func updateGrid() {
 		}
 	}
 	gridId = nextGridId
+	loadImage(uint32(gridId), data)
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.GenerateMipmap(gl.TEXTURE_2D)
-	loadImage(uint32(gridId), data)
 }
 
 func constrain(input, min, max float64) float32 {
@@ -517,8 +520,8 @@ func initOpenGL() (uint32, uint32) {
 	version := gl.GoStr(gl.GetString(gl.VERSION))
 	log.Println("OpenGL version", version)
 
-	var rdProg, basicProg uint32
-	basicProg, rdProg = setupShaders()
+	var reactProg, landProg uint32
+	reactProg, landProg = setupShaders()
 
 	//---------------------------
 
@@ -626,7 +629,7 @@ func initOpenGL() (uint32, uint32) {
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.GenerateMipmap(gl.TEXTURE_2D)
 
-	return basicProg, rdProg
+	return reactProg, landProg
 }
 
 // makeVao initializes and returns a vertex array from the points provided.

@@ -10,7 +10,7 @@ import (
 
 const (
 	// Transforms
-	vertexShaderSourceA = `
+	vertexShaderSource3D = `
 		#version 410
     layout (location = 0) in vec3 aPos;
     layout (location = 1) in vec3 aColor;
@@ -32,7 +32,7 @@ const (
 	` + "\x00"
 	// Transforms
 
-	vertexShaderSourceB = `
+	vertexShaderSource2D = `
 		#version 410
     layout (location = 0) in vec3 aPos;
     layout (location = 1) in vec3 aColor;
@@ -49,7 +49,7 @@ const (
 	` + "\x00"
 
 	// Basic Texture Colour
-	fragmentShaderSourceA = `
+	fragmentShaderSourceBasic = `
 		#version 410
 		out vec4 FragColor;
 
@@ -64,7 +64,7 @@ const (
 	` + "\x00"
 
 	// Reaction Diffusion Changes
-	fragmentShaderSourceB = `
+	fragmentShaderSourceReact = `
     #version 410
     const float offset = 1.0 / 10.0; /* res ?? */
     layout (location = 0) out vec4 FragColor;
@@ -72,7 +72,7 @@ const (
     in vec3 ourColor;
     in vec2 TexCoord;
 
-    uniform sampler2D texture1;
+    uniform sampler2D ourTexture;
 
     void main() {
 
@@ -97,7 +97,7 @@ const (
       vec3 sampleTex[9];
       for(int i = 0; i < 9; i++)
       {
-        sampleTex[i] = vec3(texture(texture1, TexCoord.st + offsets[i]));
+        sampleTex[i] = vec3(texture(ourTexture, TexCoord.st + offsets[i]));
       }
       vec3 col = vec3(0.0);
       for(int i = 0; i < 9; i++)
@@ -149,36 +149,35 @@ func compileShader(source string, shaderType uint32) (uint32, error) {
 
 func setupShaders() (uint32, uint32) {
 
-	basicVertexShader, err := compileShader(vertexShaderSourceA, gl.VERTEX_SHADER)
+	threeDVertexShader, err := compileShader(vertexShaderSource3D, gl.VERTEX_SHADER)
 	if err != nil {
 		panic(err)
 	}
 
-	transVertexShader, err := compileShader(vertexShaderSourceB, gl.VERTEX_SHADER)
+	twoDVertexShader, err := compileShader(vertexShaderSource2D, gl.VERTEX_SHADER)
 	if err != nil {
 		panic(err)
 	}
 
-	basicFragmentShader, err := compileShader(fragmentShaderSourceA, gl.FRAGMENT_SHADER)
+	basicFragmentShader, err := compileShader(fragmentShaderSourceBasic, gl.FRAGMENT_SHADER)
 	if err != nil {
 		panic(err)
 	}
 
-	/*
-		rdFragmentShader, err := compileShader(fragmentShaderSourceB, gl.FRAGMENT_SHADER)
-		if err != nil {
-			panic(err)
-		}*/
+	reactFragmentShader, err := compileShader(fragmentShaderSourceReact, gl.FRAGMENT_SHADER)
+	if err != nil {
+		panic(err)
+	}
 
-	rdProg := gl.CreateProgram()
-	gl.AttachShader(rdProg, transVertexShader)
-	gl.AttachShader(rdProg, basicFragmentShader)
-	gl.LinkProgram(rdProg)
+	reactProg := gl.CreateProgram()
+	gl.AttachShader(reactProg, twoDVertexShader)
+	gl.AttachShader(reactProg, reactFragmentShader)
+	gl.LinkProgram(reactProg)
 
-	basicProg := gl.CreateProgram()
-	gl.AttachShader(basicProg, basicVertexShader)
-	gl.AttachShader(basicProg, basicFragmentShader)
-	gl.LinkProgram(basicProg)
+	landProg := gl.CreateProgram()
+	gl.AttachShader(landProg, threeDVertexShader)
+	gl.AttachShader(landProg, basicFragmentShader)
+	gl.LinkProgram(landProg)
 
-	return basicProg, rdProg
+	return reactProg, landProg
 }

@@ -48,7 +48,7 @@ var (
 	VBO, VAO, EBO       uint32
 	sqVBO, sqVAO, sqEBO uint32
 	data                = make([]byte, cols*rows*4)
-	FBO                 uint32
+	FBO                 [2]uint32
 )
 
 var uniTex, uniTex2 int32
@@ -69,8 +69,8 @@ var conv_matrix [rows + 2][cols + 2]Pair
 var grid [2][rows][cols]Pair
 var gridId = 0
 
-var depthrenderbuffer uint32
-var texture, renderedTexture uint32
+var depthrenderbuffer [2]uint32
+var initTexture, drawTexture, renderedTexture uint32
 var timeMinusCent time.Time
 var framecount = 0
 var Info *log.Logger
@@ -141,8 +141,9 @@ func main() {
 func draw(window *glfw.Window, reactProg, landProg uint32) {
 
 	// -- DRAW TO BUFFER --
-	//gl.BindFramebuffer(gl.FRAMEBUFFER, FBO)
 	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	//gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[1])
+
 	gl.Viewport(0, 0, width*2, height*2) // Retina display doubles the framebuffer !?!
 
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
@@ -150,43 +151,43 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 
 	// bind Texture
 	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
 	gl.Uniform1i(uniTex, 0)
 
 	// render container
 	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
-	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
-
-	gl.BindVertexArray(sqVAO)
-	gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
-
-	gl.BindVertexArray(0)
-
-	// -- DRAW TO SCREEN --
-	var model glm.Mat4
-
-	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-	//gl.Viewport(0, 0, width, height)
-	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	gl.UseProgram(landProg)
-	// bind Texture
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
-	//gl.BindTexture(gl.TEXTURE_2D, texture)
-	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
-	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
-	gl.Uniform1i(uniTex2, 0)
+	gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
 
 	gl.BindVertexArray(VAO)
 	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
-	gl.BindVertexArray(0)
 
+	gl.BindVertexArray(0)
 	/*
-		gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO)
-		gl.ReadBuffer(gl.COLOR_ATTACHMENT0)
-		gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO) // Make this the texture ...
-		gl.Viewport(0, 0, width*2, height*2)
-		gl.BlitFramebuffer(0, 0, width*2, height*2, 0, 0, cols, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST)
+		// -- DRAW TO SCREEN --
+		var model glm.Mat4
+
+		gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+		//gl.Viewport(0, 0, width*2, height*2) // Retina display doubles the framebuffer !?!
+		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+		gl.UseProgram(landProg)
+		// bind Texture
+		gl.ActiveTexture(gl.TEXTURE0)
+		gl.BindTexture(gl.TEXTURE_2D, drawTexture)
+		model = glm.HomogRotate3DX(glm.DegToRad(20.0))
+		gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
+		gl.Uniform1i(uniTex2, 0)
+
+		gl.BindVertexArray(VAO)
+		gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
+		gl.BindVertexArray(0)
+	*/
+
+	/* -- copy back textures --
+	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[1])
+	gl.ReadBuffer(gl.COLOR_ATTACHMENT0)
+	gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO[0]) // Make this the texture ...
+	gl.Viewport(0, 0, width*2, height*2)
+	gl.BlitFramebuffer(0, 0, 0.2*width, 0.2*height, 0, 0, 0.3*width, 0.3*height, gl.COLOR_BUFFER_BIT, gl.NEAREST)
 	*/
 	CheckGLErrors()
 
@@ -227,6 +228,28 @@ func viewSetup(reactProg, landProg uint32) {
 		Info.Println("viewSetup Problems")
 	}
 
+	// -- DRAW TO BUFFER --
+	//gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[0])
+	gl.Viewport(0, 0, width, height) // Retina display doubles the framebuffer !?!
+
+	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.UseProgram(reactProg)
+
+	// bind Texture
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, initTexture)
+	gl.Uniform1i(uniTex, 0)
+
+	// render tri array
+	gl.BindVertexArray(sqVAO)
+	gl.DrawElements(gl.TRIANGLES, int32(len(indices2)), gl.UNSIGNED_INT, nil)
+
+	gl.BindVertexArray(0)
+
+	if CheckGLErrors() {
+		Info.Println("viewSetup Problems")
+	}
 }
 
 // initGlfw initializes glfw and returns a Window to use.
@@ -249,17 +272,22 @@ func initGlfw() *glfw.Window {
 	return window
 }
 
-func make_plane(width, height uint32, vertices []float32, indices []uint32) {
-	width++
-	height++
+// Generate 3d coords for plane
+func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
+	// width and height are the number of triangles across and down
+	// plus one for the vertices to define them
+	tWidth++
+	tHeight++
 
 	var x, y uint32
 	var scale float32
 	scale = 2.0 / float32(plane_rows)
+	//var fbTexScale = float32(cols / width)
+	var fbTexScale = float32(1.0)
 	// Set up vertices
-	for y = 0; y < height; y++ {
-		base := y * width
-		for x = 0; x < width; x++ {
+	for y = 0; y < tHeight; y++ {
+		base := y * tWidth
+		for x = 0; x < tWidth; x++ {
 			index := base + x
 			// Position
 			vertices[(8 * index)] = float32(x)*scale - 1.0
@@ -270,33 +298,33 @@ func make_plane(width, height uint32, vertices []float32, indices []uint32) {
 			vertices[(8*index)+4] = float32(1.0)
 			vertices[(8*index)+5] = float32(1.0)
 			// Texture
-			vertices[(8*index)+6] = float32(y) / float32(height-1)
-			vertices[(8*index)+7] = float32(x) / float32(width-1)
-			/*fmt.Printf("%d: %.2f, %.2f // Col %.2f %.2f %.2f // Text %.2f, %.2f\n",
-			index, vertices[(8*index)+0], vertices[(8*index)+1],
-			vertices[(8*index)+3], vertices[(8*index)+4], vertices[(8*index)+5],
-			vertices[(8*index)+6], vertices[(8*index)+7])*/
+			vertices[(8*index)+6] = fbTexScale * float32(x) / float32(tWidth-1)
+			vertices[(8*index)+7] = fbTexScale * float32(y) / float32(tHeight-1)
+			fmt.Printf("%d: Ver ( %.2f, %.2f, %.2f ) / Col ( %.2f %.2f %.2f ) / Text ( %.2f, %.2f )\n",
+				index, vertices[(8*index)+0], vertices[(8*index)+1], vertices[(8*index)+2],
+				vertices[(8*index)+3], vertices[(8*index)+4], vertices[(8*index)+5],
+				vertices[(8*index)+6], vertices[(8*index)+7])
 		}
 	}
 
 	// Set up indices
 	i := 0
-	height--
-	for y = 0; y < height; y++ {
-		base := y * width
+	tHeight--
+	for y = 0; y < tHeight; y++ {
+		base := y * tWidth
 
 		//indices[i++] = (uint16)base;
-		for x = 0; x < width; x++ {
+		for x = 0; x < tWidth; x++ {
 			indices[i] = (uint32)(base + x)
 			i += 1
-			indices[i] = (uint32)(base + width + x)
+			indices[i] = (uint32)(base + tWidth + x)
 			i += 1
 		}
 		// add a degenerate triangle (except in a last row)
-		if y < height-1 {
-			indices[i] = (uint32)((y+1)*width + (width - 1))
+		if y < tHeight-1 {
+			indices[i] = (uint32)((y+1)*tWidth + (tWidth - 1))
 			i += 1
-			indices[i] = (uint32)((y + 1) * width)
+			indices[i] = (uint32)((y + 1) * tWidth)
 			i += 1
 		}
 	}
@@ -373,6 +401,7 @@ func updateGrid() {
 	}
 	gridId = nextGridId
 	loadImage(uint32(gridId), data)
+	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.GenerateMipmap(gl.TEXTURE_2D)
 }
@@ -575,46 +604,15 @@ func initOpenGL() (uint32, uint32) {
 
 	gl.BindVertexArray(0) // Unbind
 
-	// -==- Render to texture -==-
-	gl.GenFramebuffers(1, &FBO)
-	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO)
-	// The texture we're going to render to
-	gl.GenTextures(1, &renderedTexture)
-
-	// "Bind" the newly created texture : all future texture functions will modify this texture
-	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
-
-	// Give an empty image to OpenGL ( the last "0" means "empty" )
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, nil)
-
-	// Poor filtering
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
-	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-
-	// The depth buffer
-	gl.GenRenderbuffers(1, &depthrenderbuffer)
-	gl.BindRenderbuffer(gl.RENDERBUFFER, depthrenderbuffer)
-	gl.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT, width, height)
-	gl.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthrenderbuffer)
-	gl.FramebufferTexture(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, renderedTexture, 0)
-
-	// Set the list of draw buffers.
-	DrawBuffers := [1]uint32{gl.COLOR_ATTACHMENT0}
-	gl.DrawBuffers(int32(len(DrawBuffers)), &DrawBuffers[0])
-
-	// Always check that our framebuffer is ok
-	status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
-	if status != gl.FRAMEBUFFER_COMPLETE {
-		fmt.Println("Framebuffer failed validation with status: ", status)
+	// Both FBO created here
+	createFrameBuffers()
+	if CheckGLErrors() {
+		Info.Println("InitGL Problems")
 	}
 
 	// -==- Texture data -==-
-	gl.GenTextures(1, &texture)
-	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.GenTextures(1, &initTexture)
+	gl.BindTexture(gl.TEXTURE_2D, initTexture)
 	// set the texture wrapping/filtering options (on the currently bound texture object)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
@@ -624,12 +622,70 @@ func initOpenGL() (uint32, uint32) {
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 
 	loadImage(RD_INIT_IMAGE, data)
-
-	// END OF DAY - check if colours are written correctly in the data buffer
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.GenerateMipmap(gl.TEXTURE_2D)
 
+	if CheckGLErrors() {
+		Info.Println("InitGL Problems")
+	}
+
 	return reactProg, landProg
+}
+
+func createFrameBuffers() {
+	var fbCount = len(FBO)
+
+	gl.GenFramebuffers(int32(fbCount), &FBO[0])
+	gl.GenRenderbuffers(int32(fbCount), &depthrenderbuffer[0])
+
+	for i := 0; i < fbCount; i++ {
+		// -==- Render to texture -==-
+		// FBO[0] is old, FBO[1] is new
+		gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[i]) // rendered fb
+
+		// create and "Bind" the newly created texture : all future texture functions will modify this texture
+		if i == 0 { // reference data
+			gl.GenTextures(1, &renderedTexture)
+			gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
+		} else { // draw data
+			gl.GenTextures(1, &drawTexture)
+			gl.BindTexture(gl.TEXTURE_2D, drawTexture)
+		}
+
+		// Give an empty image to OpenGL ( the last "0" means "empty" )
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, nil)
+
+		// Poor filtering
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		if i == 0 {
+			gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, renderedTexture, 0)
+		} else {
+			gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, drawTexture, 0)
+		}
+
+		// The depth buffer
+		gl.BindRenderbuffer(gl.RENDERBUFFER, depthrenderbuffer[i])
+		gl.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT, width, height)
+		gl.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthrenderbuffer[i])
+
+		// Set the list of draw buffers.
+		DrawBuffers := [1]uint32{gl.COLOR_ATTACHMENT0}
+		gl.DrawBuffers(1, &DrawBuffers[0])
+
+		// Always check that our framebuffer is ok
+		status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
+		if status != gl.FRAMEBUFFER_COMPLETE {
+			fmt.Println("Framebuffer failed validation with status: ", status)
+		}
+		if CheckGLErrors() {
+			Info.Println("Create FBO Problems")
+		}
+	}
 }
 
 // makeVao initializes and returns a vertex array from the points provided.

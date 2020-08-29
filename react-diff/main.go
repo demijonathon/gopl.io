@@ -9,6 +9,7 @@ import (
 	"github.com/EngoEngine/glm"
 	"github.com/go-gl/gl/v4.1-core/gl" // OR: github.com/go-gl/gl/v2.1/gl
 	"github.com/go-gl/glfw/v3.2/glfw"
+	perlin "github.com/ojrac/opensimplex-go"
 	"math"
 	"math/rand"
 	"time"
@@ -58,10 +59,6 @@ type Pair struct {
 	a, b float32
 }
 
-var conv_matrix [rows + 2][cols + 2]Pair
-var grid [2][rows][cols]Pair
-var gridId = 0
-
 var depthrenderbuffer [2]uint32
 var initTexture, drawTexture, renderedTexture uint32
 var timeMinusCent time.Time
@@ -74,32 +71,6 @@ func init() {
 		"INFO: ",
 		log.Ldate|log.Ltime|log.Lshortfile)
 
-	for i := range conv_matrix {
-		for j := range conv_matrix[i] {
-			conv_matrix[i][j].a = 0.0
-			conv_matrix[i][j].b = 0.0
-		}
-	}
-
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			grid[0][i][j].a = 1.0
-			grid[0][i][j].b = 0.0
-			grid[1][i][j].a = 1.0
-			grid[1][i][j].b = 0.0
-		}
-	}
-	for i := 20; i < rows-20; i++ {
-		for j := 20; j < cols-20; j++ {
-			value := rand.Float32()
-			if value > 0.6 {
-				grid[0][i][j].b = value
-			} else {
-				grid[0][i][j].b = value
-				//grid[0][i][j].b = 1.0
-			}
-		}
-	}
 	make_plane(plane_rows, plane_cols, vertices, indices)
 	timeMinusCent = time.Now()
 }
@@ -148,10 +119,6 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
 	gl.Uniform1i(uniTex, 0)
 
-	// render container
-	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
-	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
-
 	gl.BindVertexArray(VAO)
 	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
 
@@ -186,6 +153,10 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
 	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
 	gl.Uniform1i(uniTex2, 0)
+
+	// render container
+	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
+	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
 
 	gl.BindVertexArray(VAO)
 	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
@@ -275,6 +246,24 @@ func initGlfw() *glfw.Window {
 	return window
 }
 
+func make_height_map(w, h uint32, heightMap []float32) {
+	scale := 5
+	var xoff, yoff float32
+	var width, height = int(w), int(h)
+	noise := perlin.New32(rand.Int63())
+
+	for y := 0; y < height; y++ {
+		yoff = float32(y*scale) / float32(height)
+		for x := 0; x < width; x++ {
+			xoff = float32(x*scale) / float32(width)
+			heightMap[(y*width)+x] = noise.Eval2(xoff, yoff)
+			fmt.Printf("%.2f ", heightMap[(y*width)+x])
+			//fmt.Printf("Simplex noise at %d, %d, is %.2f\n", xoff, yoff, heightMap[(y*width)+x])
+		}
+		fmt.Printf("\n")
+	}
+}
+
 // Generate 3d coords for plane
 func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
 	// width and height are the number of triangles across and down
@@ -282,9 +271,12 @@ func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
 	tWidth++
 	tHeight++
 
+	var heightMap = make([]float32, tWidth*tHeight)
+	make_height_map(tWidth, tHeight, heightMap)
 	var x, y uint32
 	var scale float32
 	scale = 2.0 / float32(plane_rows)
+	hScale := scale * 2
 	//var fbTexScale = float32(cols / width)
 	var fbTexScale = float32(1.0)
 	// Set up vertices
@@ -295,7 +287,7 @@ func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
 			// Position
 			vertices[(8 * index)] = float32(x)*scale - 1.0
 			vertices[(8*index)+1] = float32(y)*scale - 1.0
-			vertices[(8*index)+2] = float32(0.0)
+			vertices[(8*index)+2] = heightMap[index] * hScale
 			// Colours
 			vertices[(8*index)+3] = float32(1.0)
 			vertices[(8*index)+4] = float32(1.0)

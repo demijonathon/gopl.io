@@ -18,7 +18,7 @@ const (
 	width  = 1000
 	height = 1000
 
-	res              = 20
+	res              = 10
 	plane_res        = 50
 	rows             = height / res
 	cols             = width / res
@@ -46,6 +46,7 @@ var (
 	VBO, VAO, EBO       uint32
 	sqVBO, sqVAO, sqEBO uint32
 	data                = make([]byte, cols*rows*4)
+	fData               = make([]byte, cols*rows*4*4)
 	FBO                 [2]uint32
 )
 
@@ -125,8 +126,6 @@ func main() {
 			fps = 100.0 / tempTime.Sub(timeMinusCent).Seconds()
 			timeMinusCent = tempTime
 			fmt.Printf("FPS = %.2f\n", fps)
-			offset := (4 * (22*cols + 18))
-			fmt.Printf("Cell [22][18] = %d, %d, %d\n", data[offset+0], data[offset+1], data[offset+2])
 		}
 	}
 }
@@ -168,9 +167,9 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 		gl.COLOR_BUFFER_BIT, gl.NEAREST) // downsample
 	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[0]) // source is low res array - put in texture
 	// read pixels saves data read as unsigned bytes and then loads them in TexImage same way
-	gl.ReadPixels(0, 0, cols, rows, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
+	gl.ReadPixels(0, 0, cols, rows, gl.RGBA, gl.FLOAT, gl.Ptr(fData))
 	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.FLOAT, gl.Ptr(fData))
 	CheckGLErrors()
 
 	// -- DRAW TO SCREEN --
@@ -197,7 +196,7 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 	glfw.PollEvents()
 	window.SwapBuffers()
 
-	time.Sleep(100 * 1000 * 1000)
+	//time.Sleep(100 * 1000 * 1000)
 }
 
 func shaderSetup(reactProg, landProg uint32) {
@@ -496,7 +495,7 @@ func createFrameBuffers() {
 		}
 
 		// Give an empty image to OpenGL ( the last "0" means "empty" )
-		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, nil)
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.FLOAT, nil)
 		gl.GenerateMipmap(gl.TEXTURE_2D)
 
 		// Poor filtering

@@ -66,8 +66,15 @@ const (
 	// Reaction Diffusion Changes
 	fragmentShaderSourceReact = `
     #version 410
-    const float offset = 1.0 / 10.0; /* res ?? */
+    const float offset = 1.0 / 50.0; /* same as cols */
     layout (location = 0) out vec4 FragColor;
+
+    /* Feed rate of A and kill rate of B */
+    const float feed = 0.055;
+    const float kill = 0.062;
+    /* Diffusion rates */
+    const float dA = 1.0;
+    const float dB = 0.5;
 
     in vec3 ourColor;
     in vec2 TexCoord;
@@ -99,11 +106,16 @@ const (
       {
         sampleTex[i] = vec3(texture(ourTexture, TexCoord.st + offsets[i]));
       }
-      vec3 col = vec3(0.0);
+      vec3 col = vec3(0.0, 0.0, 0.0);
       for(int i = 0; i < 9; i++)
         col += sampleTex[i] * kernel[i];
 
-      FragColor = vec4(col, 1.0);
+			float a = texture(ourTexture, TexCoord).x;
+			float b = texture(ourTexture, TexCoord).z;
+			float newA = clamp(a + (dA*col.x - a*b*b + feed*(1-a)), 0.0, 1.0);
+			float newB = clamp(b + (dB*col.z + a*b*b - b*(feed+kill)), 0.0, 1.0);
+
+      FragColor = vec4(newA, 0.0, newB, 1.0);
       /*FragColor = mix(texture(texture1, TexCoord), texture(texture2, TexCoord), 0.2);*/
     }
   ` + "\x00"

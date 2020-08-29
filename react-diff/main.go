@@ -141,10 +141,11 @@ func main() {
 func draw(window *glfw.Window, reactProg, landProg uint32) {
 
 	// -- DRAW TO BUFFER --
-	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-	//gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[1])
+	// define destination of pixels
+	//gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[1])
 
-	gl.Viewport(0, 0, width*2, height*2) // Retina display doubles the framebuffer !?!
+	gl.Viewport(0, 0, width, height) // Retina display doubles the framebuffer !?!
 
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	gl.UseProgram(reactProg)
@@ -156,46 +157,52 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 
 	// render container
 	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.FILL)
-	gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
+	//gl.PolygonMode(gl.FRONT_AND_BACK, gl.LINE)
 
 	gl.BindVertexArray(VAO)
 	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
 
 	gl.BindVertexArray(0)
-	/*
-		// -- DRAW TO SCREEN --
-		var model glm.Mat4
 
-		gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-		//gl.Viewport(0, 0, width*2, height*2) // Retina display doubles the framebuffer !?!
-		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-		gl.UseProgram(landProg)
-		// bind Texture
-		gl.ActiveTexture(gl.TEXTURE0)
-		gl.BindTexture(gl.TEXTURE_2D, drawTexture)
-		model = glm.HomogRotate3DX(glm.DegToRad(20.0))
-		gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
-		gl.Uniform1i(uniTex2, 0)
-
-		gl.BindVertexArray(VAO)
-		gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
-		gl.BindVertexArray(0)
-	*/
-
-	/* -- copy back textures --
-	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[1])
+	// -- copy back textures --
+	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[1]) // source is high res array
 	gl.ReadBuffer(gl.COLOR_ATTACHMENT0)
-	gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO[0]) // Make this the texture ...
-	gl.Viewport(0, 0, width*2, height*2)
-	gl.BlitFramebuffer(0, 0, 0.2*width, 0.2*height, 0, 0, 0.3*width, 0.3*height, gl.COLOR_BUFFER_BIT, gl.NEAREST)
-	*/
+	gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO[0]) // destination is cells array
+	gl.DrawBuffer(gl.COLOR_ATTACHMENT0)
+	gl.BlitFramebuffer(0, 0, width, height,
+		0, 0, rows, cols,
+		gl.COLOR_BUFFER_BIT, gl.NEAREST)
+	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[0]) // source is high res array
+	gl.ReadPixels(0, 0, cols, rows, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
+	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
+	CheckGLErrors()
+
+	// -- DRAW TO SCREEN --
+	var model glm.Mat4
+
+	// destination 0 means screen
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	gl.Viewport(0, 0, width*2, height*2) // Retina display doubles the framebuffer !?!
+	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.UseProgram(landProg)
+	// bind Texture
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, drawTexture)
+	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
+	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
+	gl.Uniform1i(uniTex2, 0)
+
+	gl.BindVertexArray(VAO)
+	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
+	gl.BindVertexArray(0)
+
 	CheckGLErrors()
 
 	glfw.PollEvents()
 	window.SwapBuffers()
 
-	updateGrid()
-	time.Sleep(1000 * 1000 * 1000)
+	//time.Sleep(1000 * 1000 * 1000)
 }
 
 func viewSetup(reactProg, landProg uint32) {
@@ -300,10 +307,10 @@ func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
 			// Texture
 			vertices[(8*index)+6] = fbTexScale * float32(x) / float32(tWidth-1)
 			vertices[(8*index)+7] = fbTexScale * float32(y) / float32(tHeight-1)
-			fmt.Printf("%d: Ver ( %.2f, %.2f, %.2f ) / Col ( %.2f %.2f %.2f ) / Text ( %.2f, %.2f )\n",
-				index, vertices[(8*index)+0], vertices[(8*index)+1], vertices[(8*index)+2],
-				vertices[(8*index)+3], vertices[(8*index)+4], vertices[(8*index)+5],
-				vertices[(8*index)+6], vertices[(8*index)+7])
+			/*fmt.Printf("%d: Ver ( %.2f, %.2f, %.2f ) / Col ( %.2f %.2f %.2f ) / Text ( %.2f, %.2f )\n",
+			index, vertices[(8*index)+0], vertices[(8*index)+1], vertices[(8*index)+2],
+			vertices[(8*index)+3], vertices[(8*index)+4], vertices[(8*index)+5],
+			vertices[(8*index)+6], vertices[(8*index)+7])*/
 		}
 	}
 
@@ -356,6 +363,7 @@ func loadImage(pattern uint32, data []uint8) {
 				}
 			}
 		}
+		// Draw blue square in bottom left (rows 2 and 3)
 		data[(4*(2*cols+2))+2] = 0xff
 		data[(4*(3*cols+2))+2] = 0xff
 		data[(4*(3*cols+3))+2] = 0xff
@@ -616,8 +624,6 @@ func initOpenGL() (uint32, uint32) {
 	// set the texture wrapping/filtering options (on the currently bound texture object)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
-	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-	//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 
@@ -654,17 +660,20 @@ func createFrameBuffers() {
 
 		// Give an empty image to OpenGL ( the last "0" means "empty" )
 		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, nil)
+		gl.GenerateMipmap(gl.TEXTURE_2D)
 
 		// Poor filtering
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
-		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-		//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 		if i == 0 {
+			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 			gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, renderedTexture, 0)
 		} else {
+			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+			//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+			//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 			gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, drawTexture, 0)
 		}
 

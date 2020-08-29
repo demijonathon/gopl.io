@@ -19,7 +19,7 @@ const (
 	width  = 1000
 	height = 1000
 
-	res              = 10
+	res              = 2
 	plane_res        = 50
 	rows             = height / res
 	cols             = width / res
@@ -49,6 +49,9 @@ var (
 	data                = make([]byte, cols*rows*4)
 	fData               = make([]byte, cols*rows*4*4)
 	FBO                 [2]uint32
+	myClock             float64
+	deltaTime           int64
+	lastFrame           time.Time
 )
 
 var uniTex, uniTex2 int32
@@ -72,32 +75,28 @@ func init() {
 		log.Ldate|log.Ltime|log.Lshortfile)
 
 	make_plane(plane_rows, plane_cols, vertices, indices)
-	timeMinusCent = time.Now()
+	lastFrame = time.Now()
 }
 
 // MAIN program loop
 func main() {
 	runtime.LockOSThread()
+	var currentFrame time.Time
 
 	window := initGlfw()
 	defer glfw.Terminate()
+
 	reactProg, landProg := initOpenGL()
-	fps := 0.0
-	var tempTime time.Time
 	shaderSetup(reactProg, landProg)
 	if CheckGLErrors() {
-		Info.Println("Problem")
+		Info.Println("Main Problem")
 	}
 
 	for !window.ShouldClose() {
 		draw(window, reactProg, landProg)
-		framecount++
-		if framecount%100 == 0 {
-			tempTime = time.Now()
-			fps = 100.0 / tempTime.Sub(timeMinusCent).Seconds()
-			timeMinusCent = tempTime
-			fmt.Printf("FPS = %.2f\n", fps)
-		}
+		currentFrame = time.Now()
+		deltaTime = currentFrame.Sub(lastFrame).Milliseconds()
+		lastFrame = currentFrame
 	}
 }
 
@@ -150,6 +149,17 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 	// bind Texture
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, drawTexture)
+
+	var view glm.Mat4
+	var brakeFactor = float64(5000.0)
+	var xCoord, yCoord float32
+	//xCoord = float32(-2.5 * math.Sin(float64(myClock)))
+	//yCoord = float32(-2.5 * math.Cos(float64(myClock)))
+	xCoord = 0.0
+	yCoord = float32(-2.5)
+	myClock = math.Mod((myClock + float64(deltaTime)/brakeFactor), (math.Pi * 2))
+	view = glm.LookAt(xCoord, yCoord, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+	gl.UniformMatrix4fv(uniView, 1, false, &view[0])
 	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
 	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
 	gl.Uniform1i(uniTex2, 0)
@@ -257,10 +267,7 @@ func make_height_map(w, h uint32, heightMap []float32) {
 		for x := 0; x < width; x++ {
 			xoff = float32(x*scale) / float32(width)
 			heightMap[(y*width)+x] = noise.Eval2(xoff, yoff)
-			fmt.Printf("%.2f ", heightMap[(y*width)+x])
-			//fmt.Printf("Simplex noise at %d, %d, is %.2f\n", xoff, yoff, heightMap[(y*width)+x])
 		}
-		fmt.Printf("\n")
 	}
 }
 
@@ -384,6 +391,10 @@ func initOpenGL() (uint32, uint32) {
 	}
 	version := gl.GoStr(gl.GetString(gl.VERSION))
 	log.Println("OpenGL version", version)
+
+	gl.Enable(gl.CULL_FACE)
+	gl.CullFace(gl.BACK)
+	gl.FrontFace(gl.CW)
 
 	var reactProg, landProg uint32
 	reactProg, landProg = setupShaders()

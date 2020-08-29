@@ -38,6 +38,7 @@ const (
     layout (location = 1) in vec3 aColor;
     layout (location = 2) in vec2 aTexCoord;
 
+    out float height;
     out vec3 ourColor;
     out vec2 TexCoord;
 
@@ -45,6 +46,8 @@ const (
       gl_Position = vec4(aPos, 1.0);
       ourColor = aColor;
       TexCoord = aTexCoord;
+			//height = aPos.z;
+			height = gl_Position.z;
 		}
 	` + "\x00"
 
@@ -75,6 +78,7 @@ const (
     const float dA = 1.0;
     const float dB = 0.5;
 
+    in float height;
     in vec3 ourColor;
     in vec2 TexCoord;
 
@@ -85,6 +89,9 @@ const (
 
     void main() {
 
+			float zValue = clamp((height + 1.0 ) / 2.0, -0.001, 0.001);
+			float killv = kill - zValue;
+			//float feedv = feed + zValue;
       vec2 clampCoord = floor(TexCoord.st * cells) / cells;
 
       vec2 offsets[9] = vec2[](
@@ -117,7 +124,8 @@ const (
       float a = sampleTex[4].x;
       float b = sampleTex[4].z;
       float newA = clamp(a + (dA*col.x - a*b*b + feed*(1-a)), 0.0, 1.0);
-      float newB = clamp(b + (dB*col.z + a*b*b - b*(feed+kill)), 0.0, 1.0);
+      float newB = clamp(b + (dB*col.z + a*b*b - b*(feed+killv)), 0.0, 1.0);
+
 
       FragColor = vec4(newA, 0.0, newB, 1.0);
       /*FragColor = mix(texture(texture1, TexCoord), texture(texture2, TexCoord), 0.2);*/

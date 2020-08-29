@@ -66,7 +66,6 @@ const (
 	// Reaction Diffusion Changes
 	fragmentShaderSourceReact = `
     #version 410
-    const float offset = 1.0 / 50.0; /* same as cols */
     layout (location = 0) out vec4 FragColor;
 
     /* Feed rate of A and kill rate of B */
@@ -80,8 +79,13 @@ const (
     in vec2 TexCoord;
 
     uniform sampler2D ourTexture;
+    uniform float cells;
+
+    float offset = 1.0 / cells; /* same as cols */
 
     void main() {
+
+      vec2 clampCoord = floor(TexCoord.st * cells) / cells;
 
       vec2 offsets[9] = vec2[](
         vec2(-offset,  offset), // top-left
@@ -102,18 +106,18 @@ const (
       );
 
       vec3 sampleTex[9];
-      for(int i = 0; i < 9; i++)
-      {
-        sampleTex[i] = vec3(texture(ourTexture, TexCoord.st + offsets[i]));
+      for(int i = 0; i < 9; i++) {
+        sampleTex[i] = vec3(texture(ourTexture, clampCoord.st + offsets[i]));
       }
       vec3 col = vec3(0.0, 0.0, 0.0);
-      for(int i = 0; i < 9; i++)
+      for(int i = 0; i < 9; i++) {
         col += sampleTex[i] * kernel[i];
+      }
 
-			float a = texture(ourTexture, TexCoord).x;
-			float b = texture(ourTexture, TexCoord).z;
-			float newA = clamp(a + (dA*col.x - a*b*b + feed*(1-a)), 0.0, 1.0);
-			float newB = clamp(b + (dB*col.z + a*b*b - b*(feed+kill)), 0.0, 1.0);
+      float a = sampleTex[4].x;
+      float b = sampleTex[4].z;
+      float newA = clamp(a + (dA*col.x - a*b*b + feed*(1-a)), 0.0, 1.0);
+      float newB = clamp(b + (dB*col.z + a*b*b - b*(feed+kill)), 0.0, 1.0);
 
       FragColor = vec4(newA, 0.0, newB, 1.0);
       /*FragColor = mix(texture(texture1, TexCoord), texture(texture2, TexCoord), 0.2);*/

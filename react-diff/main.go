@@ -18,8 +18,6 @@ const (
 	width  = 1000
 	height = 1000
 
-	RD_INIT_IMAGE = 2
-
 	res              = 20
 	plane_res        = 50
 	rows             = height / res
@@ -53,13 +51,7 @@ var (
 
 var uniTex, uniTex2 int32
 var uniProj, uniView int32
-var uniModel int32
-
-type cell struct {
-	drawable uint32
-	x        int
-	y        int
-}
+var uniCell, uniModel int32
 
 type Pair struct {
 	a, b float32
@@ -120,7 +112,7 @@ func main() {
 	reactProg, landProg := initOpenGL()
 	fps := 0.0
 	var tempTime time.Time
-	viewSetup(reactProg, landProg)
+	shaderSetup(reactProg, landProg)
 	if CheckGLErrors() {
 		Info.Println("Problem")
 	}
@@ -133,6 +125,8 @@ func main() {
 			fps = 100.0 / tempTime.Sub(timeMinusCent).Seconds()
 			timeMinusCent = tempTime
 			fmt.Printf("FPS = %.2f\n", fps)
+			offset := (4 * (22*cols + 18))
+			fmt.Printf("Cell [22][18] = %d, %d, %d\n", data[offset+0], data[offset+1], data[offset+2])
 		}
 	}
 }
@@ -170,9 +164,10 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 	gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO[0]) // destination is cells array
 	gl.DrawBuffer(gl.COLOR_ATTACHMENT0)
 	gl.BlitFramebuffer(0, 0, width, height,
-		0, 0, rows, cols,
-		gl.COLOR_BUFFER_BIT, gl.NEAREST)
-	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[0]) // source is high res array
+		0, 0, cols, rows,
+		gl.COLOR_BUFFER_BIT, gl.NEAREST) // downsample
+	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[0]) // source is low res array - put in texture
+	// read pixels saves data read as unsigned bytes and then loads them in TexImage same way
 	gl.ReadPixels(0, 0, cols, rows, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
@@ -202,40 +197,42 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 	glfw.PollEvents()
 	window.SwapBuffers()
 
-	//time.Sleep(1000 * 1000 * 1000)
+	time.Sleep(100 * 1000 * 1000)
 }
 
-func viewSetup(reactProg, landProg uint32) {
+func shaderSetup(reactProg, landProg uint32) {
 
 	var view, proj glm.Mat4
 
+	// Setup landscape drawing shader
 	gl.UseProgram(landProg)
-	if CheckGLErrors() {
-		Info.Println("Problem")
-	}
+
+	uniTex2 = gl.GetUniformLocation(landProg, gl.Str("texture1\x00"))
+	uniModel = gl.GetUniformLocation(landProg, gl.Str("model\x00"))
+	uniView = gl.GetUniformLocation(landProg, gl.Str("view\x00"))
+	uniProj = gl.GetUniformLocation(landProg, gl.Str("proj\x00"))
 
 	view = glm.LookAt(
 		0.0, -2.5, 1.0, // Eye
 		0.0, 0.0, 0.0, // Centre
 		0.0, 0.0, 1.0, // Up
 	)
-	uniTex2 = gl.GetUniformLocation(landProg, gl.Str("texture1\x00"))
-	uniModel = gl.GetUniformLocation(landProg, gl.Str("model\x00"))
-	uniView = gl.GetUniformLocation(landProg, gl.Str("view\x00"))
-	uniProj = gl.GetUniformLocation(landProg, gl.Str("proj\x00"))
-
 	gl.UniformMatrix4fv(uniView, 1, false, &view[0])
 	proj = glm.Perspective(glm.DegToRad(45.0), float32(height)/float32(width), 1.0, 10.0)
 	gl.UniformMatrix4fv(uniProj, 1, false, &proj[0])
 
+	// Setup reaction - diffusion shader
 	gl.UseProgram(reactProg)
 	uniTex = gl.GetUniformLocation(reactProg, gl.Str("ourTexture\x00"))
+	uniCell = gl.GetUniformLocation(reactProg, gl.Str("cells\x00"))
+
+	gl.Uniform1f(uniCell, float32(cols))
 
 	if CheckGLErrors() {
-		Info.Println("viewSetup Problems")
+		Info.Println("shaderSetup Problems")
 	}
 
-	// -- DRAW TO BUFFER --
+	// -- LOAD TEXTURE INTO BUFFER --
 	//gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
 	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[0])
 	gl.Viewport(0, 0, width, height) // Retina display doubles the framebuffer !?!
@@ -255,7 +252,7 @@ func viewSetup(reactProg, landProg uint32) {
 	gl.BindVertexArray(0)
 
 	if CheckGLErrors() {
-		Info.Println("viewSetup Problems")
+		Info.Println("draw Problems")
 	}
 }
 
@@ -343,32 +340,33 @@ func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
 	fmt.Printf("\nIn total %d indices\n", ind)*/
 }
 
-func loadImage(pattern uint32, data []uint8) {
-	if pattern == 2 { // Initialise
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				data[(4*(i*cols+j))+0] = 0xff
-				data[(4*(i*cols+j))+1] = 0x00
-				data[(4*(i*cols+j))+2] = 0x00
-				data[(4*(i*cols+j))+3] = 0xff
+// Draw the texture for the initial pattern to kick off the model
+func loadImage(data []uint8) {
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			data[(4*(i*cols+j))+0] = 0xff
+			data[(4*(i*cols+j))+1] = 0x00
+			data[(4*(i*cols+j))+2] = 0x00
+			data[(4*(i*cols+j))+3] = 0xff
+		}
+	}
+	for i := 20; i < rows-20; i++ {
+		for j := 20; j < cols-20; j++ {
+			value := rand.Float64()
+			if value > 0.6 {
+				data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * value))
+			} else {
+				data[(4*(i*cols+j))+2] = 0xff
 			}
 		}
-		for i := 20; i < rows-20; i++ {
-			for j := 20; j < cols-20; j++ {
-				value := rand.Float64()
-				if value > 0.6 {
-					data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * value))
-				} else {
-					data[(4*(i*cols+j))+2] = 0xff
-				}
-			}
-		}
-		// Draw blue square in bottom left (rows 2 and 3)
-		data[(4*(2*cols+2))+2] = 0xff
-		data[(4*(3*cols+2))+2] = 0xff
-		data[(4*(3*cols+3))+2] = 0xff
-		data[(4*(2*cols+3))+2] = 0xff
-	} else if pattern < 2 { // load from grid
+	}
+	// Draw blue square in bottom left (rows 2 and 3)
+	data[(4*(2*cols+2))+2] = 0xff
+	data[(4*(3*cols+2))+2] = 0xff
+	data[(4*(3*cols+3))+2] = 0xff
+	data[(4*(2*cols+3))+2] = 0xff
+
+	/*else if pattern < 2 { // load from grid
 		for i := 0; i < rows; i++ {
 			for j := 0; j < cols; j++ {
 				data[(4*(i*cols+j))+0] = uint8(math.Round(255.0 * float64(grid[pattern][i][j].a)))
@@ -377,175 +375,14 @@ func loadImage(pattern uint32, data []uint8) {
 				data[(4*(i*cols+j))+3] = 0xff
 			}
 		}
-	}
+	}*/
 }
 
-func updateGrid() {
-	var nextGridId = ^gridId & 0x1
-	var a, b float64
-	var laplaceA, laplaceB float64
-
-	// Feed rate of A and kill rate of B
-	var feed = 0.055
-	var kill = 0.062
-	// Diffusion rates
-	var dA = 1.0
-	var dB = 0.5
-
-	updateLaplace()
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			a = float64(grid[gridId][i][j].a)
-			b = float64(grid[gridId][i][j].b)
-			laplaceA, laplaceB = laplaceM(i, j)
-
-			// Calculate the new values
-			newA := a + (dA*laplaceA - a*b*b + feed*(1-a))
-			newB := b + (dB*laplaceB + a*b*b - b*(feed+kill))
-
-			grid[nextGridId][i][j].a = constrain(newA, 0.0, 1.0)
-			grid[nextGridId][i][j].b = constrain(newB, 0.0, 1.0)
-		}
-	}
-	gridId = nextGridId
-	loadImage(uint32(gridId), data)
-	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
-	gl.GenerateMipmap(gl.TEXTURE_2D)
-}
-
+// Constrain the input between two values
 func constrain(input, min, max float64) float32 {
 	var value float32
 	value = float32(math.Min(max, math.Max(min, input)))
 	return value
-}
-
-func updateLaplace() {
-	// Centre
-	for x, i := 0, 1; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 1; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a = grid[gridId][x][y].a * -1.0
-			conv_matrix[i][j].b = grid[gridId][x][y].b * -1.0
-		}
-	}
-	// Left
-	for x, i := 0, 0; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 1; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
-		}
-	}
-	// Right
-	for x, i := 0, 2; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 1; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
-		}
-	}
-	// Up
-	for x, i := 0, 1; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 2; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
-		}
-	}
-	// Down
-	for x, i := 0, 1; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 0; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.2
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.2
-		}
-	}
-	// Left Up
-	for x, i := 0, 0; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 2; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
-		}
-	}
-	// Right Up
-	for x, i := 0, 2; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 2; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
-		}
-	}
-	// Left Down
-	for x, i := 0, 0; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 0; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
-		}
-	}
-	// Right Down
-	for x, i := 0, 2; x < rows; x, i = x+1, i+1 {
-		for y, j := 0, 0; y < cols; y, j = y+1, j+1 {
-			conv_matrix[i][j].a += grid[gridId][x][y].a * 0.05
-			conv_matrix[i][j].b += grid[gridId][x][y].b * 0.05
-		}
-	}
-	// Overlaps
-	for j := 0; j < cols+2; j++ {
-		conv_matrix[rows][j].a += conv_matrix[0][j].a
-		conv_matrix[1][j].a += conv_matrix[rows+1][j].a
-		conv_matrix[rows][j].b += conv_matrix[0][j].b
-		conv_matrix[1][j].b += conv_matrix[rows+1][j].b
-		conv_matrix[0][j].a = 0
-		conv_matrix[rows+1][j].a = 0
-		conv_matrix[0][j].b = 0
-		conv_matrix[rows+1][j].b = 0
-	}
-	for i := 0; i < rows+2; i++ {
-		conv_matrix[i][cols].a += conv_matrix[i][0].a
-		conv_matrix[i][1].a += conv_matrix[i][cols+1].a
-		conv_matrix[i][cols].b += conv_matrix[i][0].b
-		conv_matrix[i][1].b += conv_matrix[i][cols+1].b
-		conv_matrix[i][0].a = 0
-		conv_matrix[i][cols+1].a = 0
-		conv_matrix[i][0].b = 0
-		conv_matrix[i][cols+1].b = 0
-	}
-}
-
-func laplaceM(x, y int) (float64, float64) {
-	return float64(conv_matrix[x+1][y+1].a), float64(conv_matrix[x+1][y+1].b)
-}
-
-func laplace(x, y int) (float64, float64) {
-	var sumA, sumB = 0.0, 0.0
-	count := 0
-	product := 0.0
-
-	for i := x - 1; i <= x+1; i++ {
-		for j := y - 1; j <= y+1; j++ {
-
-			if count%2 != 0 {
-				product = 0.2
-			} else if count == 4 {
-				product = -1
-			} else {
-				product = 0.05
-			}
-
-			// pmod on index used for wrapping around borders
-			sumA += float64(grid[gridId][pmod(i, rows)][pmod(j, cols)].a) * product
-			sumB += float64(grid[gridId][pmod(i, rows)][pmod(j, cols)].b) * product
-
-			count += 1
-		}
-	}
-	return sumA, sumB
-}
-
-func pmod(x, d int) int {
-	r := x % d
-	if x >= d {
-		return x - d
-	} else if x < 0 {
-		return x + d
-	} else {
-		return r
-	}
 }
 
 //------------------------------------
@@ -627,7 +464,7 @@ func initOpenGL() (uint32, uint32) {
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 
-	loadImage(RD_INIT_IMAGE, data)
+	loadImage(data)
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.GenerateMipmap(gl.TEXTURE_2D)
 
@@ -665,15 +502,13 @@ func createFrameBuffers() {
 		// Poor filtering
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 		if i == 0 {
-			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 			gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, renderedTexture, 0)
 		} else {
-			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-			gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-			//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-			//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+			//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+			//gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 			gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, drawTexture, 0)
 		}
 

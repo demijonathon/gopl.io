@@ -82,6 +82,7 @@ func init() {
 func main() {
 	runtime.LockOSThread()
 	var currentFrame time.Time
+	var frameCount = 0
 
 	window := initGlfw()
 	defer glfw.Terminate()
@@ -97,47 +98,54 @@ func main() {
 		currentFrame = time.Now()
 		deltaTime = currentFrame.Sub(lastFrame).Milliseconds()
 		lastFrame = currentFrame
+		if frameCount > 100 {
+			//fmt.Printf("FPS = %.2f\n", 1000.0/float32(deltaTime))
+			frameCount -= 100
+		}
+		frameCount++
 	}
 }
 
 // DRAW method for vertex arrays
 func draw(window *glfw.Window, reactProg, landProg uint32) {
 
-	// -- DRAW TO BUFFER --
-	// define destination of pixels
-	//gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-	gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[1])
+	var renderLoops = 4
+	for i := 0; i < renderLoops; i++ {
+		// -- DRAW TO BUFFER --
+		// define destination of pixels
+		//gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+		gl.BindFramebuffer(gl.FRAMEBUFFER, FBO[1])
 
-	gl.Viewport(0, 0, width, height) // Retina display doubles the framebuffer !?!
+		gl.Viewport(0, 0, width, height) // Retina display doubles the framebuffer !?!
 
-	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-	gl.UseProgram(reactProg)
+		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+		gl.UseProgram(reactProg)
 
-	// bind Texture
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
-	gl.Uniform1i(uniTex, 0)
+		// bind Texture
+		gl.ActiveTexture(gl.TEXTURE0)
+		gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
+		gl.Uniform1i(uniTex, 0)
 
-	gl.BindVertexArray(VAO)
-	gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
+		gl.BindVertexArray(VAO)
+		gl.DrawElements(gl.TRIANGLE_STRIP, int32(len(indices)), gl.UNSIGNED_INT, nil)
 
-	gl.BindVertexArray(0)
+		gl.BindVertexArray(0)
 
-	// -- copy back textures --
-	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[1]) // source is high res array
-	gl.ReadBuffer(gl.COLOR_ATTACHMENT0)
-	gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO[0]) // destination is cells array
-	gl.DrawBuffer(gl.COLOR_ATTACHMENT0)
-	gl.BlitFramebuffer(0, 0, width, height,
-		0, 0, cols, rows,
-		gl.COLOR_BUFFER_BIT, gl.NEAREST) // downsample
-	gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[0]) // source is low res array - put in texture
-	// read pixels saves data read as unsigned bytes and then loads them in TexImage same way
-	gl.ReadPixels(0, 0, cols, rows, gl.RGBA, gl.FLOAT, gl.Ptr(fData))
-	gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.FLOAT, gl.Ptr(fData))
-	CheckGLErrors()
-
+		// -- copy back textures --
+		gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[1]) // source is high res array
+		gl.ReadBuffer(gl.COLOR_ATTACHMENT0)
+		gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, FBO[0]) // destination is cells array
+		gl.DrawBuffer(gl.COLOR_ATTACHMENT0)
+		gl.BlitFramebuffer(0, 0, width, height,
+			0, 0, cols, rows,
+			gl.COLOR_BUFFER_BIT, gl.NEAREST) // downsample
+		gl.BindFramebuffer(gl.READ_FRAMEBUFFER, FBO[0]) // source is low res array - put in texture
+		// read pixels saves data read as unsigned bytes and then loads them in TexImage same way
+		gl.ReadPixels(0, 0, cols, rows, gl.RGBA, gl.FLOAT, gl.Ptr(fData))
+		gl.BindTexture(gl.TEXTURE_2D, renderedTexture)
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.FLOAT, gl.Ptr(fData))
+		CheckGLErrors()
+	}
 	// -- DRAW TO SCREEN --
 	var model glm.Mat4
 
@@ -259,16 +267,27 @@ func initGlfw() *glfw.Window {
 func make_height_map(w, h uint32, heightMap []float32) {
 	scale := 5
 	var xoff, yoff float32
+	var maxValue, minValue, value float32
 	var width, height = int(w), int(h)
-	noise := perlin.New32(rand.Int63())
+	var seed = time.Now().Second()
+	//noise := perlin.New32(rand.Int63())
+	noise := perlin.New32(int64(seed))
+	maxValue, minValue = 0.0, 0.0
 
 	for y := 0; y < height; y++ {
 		yoff = float32(y*scale) / float32(height)
 		for x := 0; x < width; x++ {
 			xoff = float32(x*scale) / float32(width)
-			heightMap[(y*width)+x] = noise.Eval2(xoff, yoff)
+			value = noise.Eval2(xoff, yoff)
+			heightMap[(y*width)+x] = value
+			if value > maxValue {
+				maxValue = value
+			} else if value < minValue {
+				minValue = value
+			}
 		}
 	}
+	fmt.Printf("Max height = %.2f, min height = %.2f\n", maxValue, minValue)
 }
 
 // Generate 3d coords for plane
@@ -348,8 +367,9 @@ func loadImage(data []uint8) {
 			data[(4*(i*cols+j))+3] = 0xff
 		}
 	}
-	for i := 20; i < rows-20; i++ {
-		for j := 20; j < cols-20; j++ {
+	var border = cols / 4
+	for i := border; i < rows-border; i++ {
+		for j := border; j < cols-border; j++ {
 			value := rand.Float64()
 			if value > 0.6 {
 				data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * value))
@@ -359,21 +379,12 @@ func loadImage(data []uint8) {
 		}
 	}
 	// Draw blue square in bottom left (rows 2 and 3)
-	data[(4*(2*cols+2))+2] = 0xff
-	data[(4*(3*cols+2))+2] = 0xff
-	data[(4*(3*cols+3))+2] = 0xff
-	data[(4*(2*cols+3))+2] = 0xff
-
-	/*else if pattern < 2 { // load from grid
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				data[(4*(i*cols+j))+0] = uint8(math.Round(255.0 * float64(grid[pattern][i][j].a)))
-				data[(4*(i*cols+j))+1] = 0x00
-				data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * float64(grid[pattern][i][j].b)))
-				data[(4*(i*cols+j))+3] = 0xff
-			}
-		}
-	}*/
+	/*
+		data[(4*(2*cols+2))+2] = 0xff
+		data[(4*(3*cols+2))+2] = 0xff
+		data[(4*(3*cols+3))+2] = 0xff
+		data[(4*(2*cols+3))+2] = 0xff
+	*/
 }
 
 // Constrain the input between two values

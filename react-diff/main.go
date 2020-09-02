@@ -20,7 +20,7 @@ const (
 	height = 1000
 
 	res              = 2
-	plane_res        = 50
+	plane_res        = 60
 	rows             = height / res
 	cols             = width / res
 	plane_rows       = height / plane_res
@@ -358,7 +358,7 @@ func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
 }
 
 // Draw the texture for the initial pattern to kick off the model
-func loadImage(data []uint8) {
+func loadImage(pattern int, data []uint8) {
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
 			data[(4*(i*cols+j))+0] = 0xff
@@ -367,24 +367,30 @@ func loadImage(data []uint8) {
 			data[(4*(i*cols+j))+3] = 0xff
 		}
 	}
-	var border = cols / 4
-	for i := border; i < rows-border; i++ {
-		for j := border; j < cols-border; j++ {
-			value := rand.Float64()
-			if value > 0.6 {
-				data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * value))
-			} else {
-				data[(4*(i*cols+j))+2] = 0xff
+	if pattern == 1 {
+		var border = cols / 4
+		for i := border; i < rows-border; i++ {
+			for j := border; j < cols-border; j++ {
+				value := rand.Float64()
+				if value > 0.7 {
+					data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * value))
+				} else {
+					data[(4*(i*cols+j))+2] = 0xff
+				}
+			}
+		}
+	} else {
+		var checker = 40
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				if (((i/checker)%2) == 0 && ((j/checker)%2) == 0) ||
+					(((i/checker)%2) == 1 && ((j/checker)%2) == 1) {
+					value := rand.Float64()
+					data[(4*(i*cols+j))+2] = uint8(math.Round(255.0 * value))
+				}
 			}
 		}
 	}
-	// Draw blue square in bottom left (rows 2 and 3)
-	/*
-		data[(4*(2*cols+2))+2] = 0xff
-		data[(4*(3*cols+2))+2] = 0xff
-		data[(4*(3*cols+3))+2] = 0xff
-		data[(4*(2*cols+3))+2] = 0xff
-	*/
 }
 
 // Constrain the input between two values
@@ -477,7 +483,7 @@ func initOpenGL() (uint32, uint32) {
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 
-	loadImage(data)
+	loadImage(1, data)
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data))
 	gl.GenerateMipmap(gl.TEXTURE_2D)
 

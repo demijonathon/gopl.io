@@ -72,12 +72,21 @@ const (
     layout (location = 0) out vec4 FragColor;
 
     /* Feed rate of A and kill rate of B 
-    const float feed = 0.055;
-    const float kill = 0.062;
-    const float feed = 0.069;
-    const float kill = 0.062;*/
-    const float feed = 0.024;
+    const float feed = 0.014; // Moving Spots
+    const float kill = 0.054;
+    const float feed = 0.025; // Slow Polka Dots
+    const float kill = 0.061;
+    const float feed = 0.090; // Bubbles
     const float kill = 0.059;
+    const float feed = 0.026; // Chaos in the valley
+    const float kill = 0.051;
+    const float feed = 0.026; // Dynamic dots and strips
+    const float kill = 0.055;
+    const float feed = 0.0214; // Beautiful mess
+    const float kill = 0.047;
+		*/
+    const float feed = 0.055; // Defaults
+    const float kill = 0.062;
     /* Diffusion rates */
     const float dA = 1.0;
     const float dB = 0.5;
@@ -93,10 +102,12 @@ const (
 
     void main() {
 
-			float zValue = clamp(((height + 0.2) * 1.4) ,0.0, 1.0);
-			float feedv = feed + (zValue * 0.009);
-			float killv = kill - (zValue * 0.003);
-			float gValue = round( 8.0 * zValue) / 8.0 ;
+			float zValue = clamp(((height + 0.2) * 2.5), 0.0, 1.0);
+			
+			float feedv = feed - (zValue * 0.002);
+			float killv = kill + (zValue * 0.003);
+
+			float gValue = round( 8.0 * zValue) / 16.0;
 
       vec2 clampCoord = floor(TexCoord.st * cells) / cells;
 

@@ -69,6 +69,8 @@ const (
 	// Reaction Diffusion Changes
 	fragmentShaderSourceReact = `
     #version 410
+		#define FEED_BLEED 1
+
     layout (location = 0) out vec4 FragColor;
 
     /* Feed rate of A and kill rate of B 
@@ -78,15 +80,15 @@ const (
     const float kill = 0.061;
     const float feed = 0.090; // Bubbles
     const float kill = 0.059;
+    const float feed = 0.055; // Defaults
+    const float kill = 0.062;
     const float feed = 0.026; // Chaos in the valley
     const float kill = 0.051;
-    const float feed = 0.026; // Dynamic dots and strips
-    const float kill = 0.055;
     const float feed = 0.0214; // Beautiful mess
     const float kill = 0.047;
 		*/
-    const float feed = 0.055; // Defaults
-    const float kill = 0.062;
+    const float feed = 0.026; // Dynamic dots and strips
+    const float kill = 0.055;
     /* Diffusion rates */
     const float dA = 1.0;
     const float dB = 0.5;
@@ -103,9 +105,14 @@ const (
     void main() {
 
 			float zValue = clamp(((height + 0.2) * 2.5), 0.0, 1.0);
-			
+		
+		#if FEED_BLEED
 			float feedv = feed - (zValue * 0.002);
 			float killv = kill + (zValue * 0.003);
+		#else
+			float feedv = feed;
+			float killv = kill;
+		#endif
 
 			float gValue = round( 8.0 * zValue) / 16.0;
 
@@ -124,9 +131,9 @@ const (
       );
 
       float kernel[9] = float[](
-        0.05,  0.2, 0.05,
-         0.2, -1.0,  0.2,
-        0.05,  0.2, 0.05
+        0.05,  0.20, 0.05,
+        0.20, -1.00, 0.20,
+        0.05,  0.20, 0.05
       );
 
       vec3 sampleTex[9];

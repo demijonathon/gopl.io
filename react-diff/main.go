@@ -20,7 +20,7 @@ const (
 	height = 1000
 
 	res              = 2
-	plane_res        = 60
+	plane_res        = 40
 	rows             = height / res
 	cols             = width / res
 	plane_rows       = height / plane_res
@@ -82,7 +82,10 @@ func init() {
 func main() {
 	runtime.LockOSThread()
 	var currentFrame time.Time
+	//var fpsTime time.Time
 	var frameCount = 0
+
+	//fpsTime = time.Now()
 
 	window := initGlfw()
 	defer glfw.Terminate()
@@ -95,12 +98,14 @@ func main() {
 
 	for !window.ShouldClose() {
 		draw(window, reactProg, landProg)
+
 		currentFrame = time.Now()
 		deltaTime = currentFrame.Sub(lastFrame).Milliseconds()
 		lastFrame = currentFrame
 		if frameCount > 100 {
-			//fmt.Printf("FPS = %.2f\n", 1000.0/float32(deltaTime))
+			//fmt.Printf("FPS = %.2f\n", 100.0/float32(currentFrame.Sub(fpsTime).Seconds()))
 			frameCount -= 100
+			//fpsTime = currentFrame
 		}
 		frameCount++
 	}
@@ -159,16 +164,16 @@ func draw(window *glfw.Window, reactProg, landProg uint32) {
 	gl.BindTexture(gl.TEXTURE_2D, drawTexture)
 
 	var view glm.Mat4
-	var brakeFactor = float64(5000.0)
+	var brakeFactor = float64(20000.0)
 	var xCoord, yCoord float32
-	//xCoord = float32(-2.5 * math.Sin(float64(myClock)))
-	//yCoord = float32(-2.5 * math.Cos(float64(myClock)))
-	xCoord = 0.0
-	yCoord = float32(-2.5)
+	xCoord = float32(-3.0 * math.Sin(float64(myClock)))
+	yCoord = float32(-3.0 * math.Cos(float64(myClock)))
+	//xCoord = 0.0
+	//yCoord = float32(-2.5)
 	myClock = math.Mod((myClock + float64(deltaTime)/brakeFactor), (math.Pi * 2))
-	view = glm.LookAt(xCoord, yCoord, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+	view = glm.LookAt(xCoord, yCoord, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 	gl.UniformMatrix4fv(uniView, 1, false, &view[0])
-	model = glm.HomogRotate3DX(glm.DegToRad(20.0))
+	model = glm.HomogRotate3DX(glm.DegToRad(00.0))
 	gl.UniformMatrix4fv(uniModel, 1, false, &model[0])
 	gl.Uniform1i(uniTex2, 0)
 
@@ -264,7 +269,7 @@ func initGlfw() *glfw.Window {
 	return window
 }
 
-func make_height_map(w, h uint32, heightMap []float32) {
+func make_height_map(w, h uint32, heightMap []float32, isIsland bool) {
 	scale := 5
 	var xoff, yoff float32
 	var maxValue, minValue, value float32
@@ -287,6 +292,20 @@ func make_height_map(w, h uint32, heightMap []float32) {
 			}
 		}
 	}
+
+	if isIsland {
+		var base int
+		var border = 2
+		for y := 0; y < height; y++ {
+			base = y * width
+			for x := 0; x < width; x++ {
+				if x < border || width-x < border ||
+					y < border || height-y < border {
+					heightMap[base+x] = 0.0
+				}
+			}
+		}
+	}
 	fmt.Printf("Max height = %.2f, min height = %.2f\n", maxValue, minValue)
 }
 
@@ -297,8 +316,9 @@ func make_plane(tWidth, tHeight uint32, vertices []float32, indices []uint32) {
 	tWidth++
 	tHeight++
 
+	var makeIsland = true
 	var heightMap = make([]float32, tWidth*tHeight)
-	make_height_map(tWidth, tHeight, heightMap)
+	make_height_map(tWidth, tHeight, heightMap, makeIsland)
 	var x, y uint32
 	var scale float32
 	scale = 2.0 / float32(plane_rows)
